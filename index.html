@@ -487,20 +487,22 @@
 
     .sort-dropdown {
       padding: 8px 28px 8px 12px;
-      border: 1px solid #d1d5db;
+      border: 1px solid var(--border);
       border-radius: 8px;
+      font-family: var(--font);
       font-size: 0.85rem;
-      color: #374151;
-      background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M3 5l3 3 3-3'/%3E%3C/svg%3E") no-repeat right 10px center;
+      color: var(--text-primary);
+      background: var(--input-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M3 5l3 3 3-3'/%3E%3C/svg%3E") no-repeat right 10px center;
       -webkit-appearance: none;
       appearance: none;
       cursor: pointer;
       min-width: 180px;
+      transition: all 0.3s var(--ease);
     }
     .sort-dropdown:focus {
       outline: none;
-      border-color: #7c3aed;
-      box-shadow: 0 0 0 3px rgba(124,58,237,0.12);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
     }
 
     /* ─── Cards Grid ─────────────────────────────────── */
@@ -1424,7 +1426,7 @@
           <li><strong>Search Tab:</strong> Browse our curated database of 53 programs with full admission requirements. Use filters to narrow by state, degree type, or format.</li>
           <li><strong>Explore Tab:</strong> Search any US school by name and get live data from the Department of Education — no limits on which schools you can search.</li>
           <li><strong>Click for Details:</strong> Click any card to open detailed admission requirements, including a full Application Materials Checklist (essays, recommendation letters, CV, transcripts, English proficiency).</li>
-          <li><strong>Save &amp; Export:</strong> Bookmark programs, then export your list as a CSV (for Excel) or a formatted PDF. Share your saved list with friends via a link.</li>
+          <li><strong>Save &amp; Export:</strong> Bookmark programs, then export your list as a CSV (for Excel) or a formatted PDF.</li>
         </ul>
 
         <h2>Accuracy &amp; Data Quality</h2>
@@ -1529,7 +1531,7 @@
         </div>
       </div>
       <div class="footer-bottom">
-        &copy; 2025 AdmitKit. All rights reserved.
+        &copy; 2026 AdmitKit. All rights reserved.
       </div>
     </div>
   </footer>
@@ -2141,6 +2143,21 @@
       document.getElementById('modal').classList.remove('active');
       document.body.style.overflow = '';
     }
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        var modal = document.getElementById('modal');
+        if (modal && modal.classList.contains('active')) {
+          closeModal();
+        }
+      }
+    });
+
+    // Close modal on backdrop click
+    document.getElementById('modal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
 
     // ─── API Result Detail Modal ─────────────────────────────────────────
     // Stores API result data temporarily so cards can open a detail modal
@@ -3249,9 +3266,10 @@
       }
       printWin.document.write(html);
       printWin.document.close();
-      printWin.onload = function() { printWin.print(); };
-      // Fallback: trigger print after short delay in case onload doesn't fire
-      setTimeout(function() { try { printWin.print(); } catch(e) {} }, 500);
+      var _printTriggered = false;
+      printWin.onload = function() { _printTriggered = true; printWin.print(); };
+      // Fallback: trigger print after short delay only if onload didn't fire
+      setTimeout(function() { if (!_printTriggered) { try { printWin.print(); } catch(e) {} } }, 800);
     }
 
     // ─── College Scorecard API ───────────────────────────────────
