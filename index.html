@@ -2411,10 +2411,8 @@
           progEarningsHtml +
           (!_modalProgEarnings && outcomes.earnings ? '<div class="overview-item"><div class="overview-item-label">Avg Earnings (10yr, All Students)</div><div class="overview-item-value" style="color:var(--success);font-weight:700;">' + outcomes.earnings + '</div></div>' : '') +
           (outcomes.debt ? '<div class="overview-item"><div class="overview-item-label">Median Debt (All)</div><div class="overview-item-value">' + outcomes.debt + '</div></div>' : '') +
-          (outcomes.gradRate ? '<div class="overview-item"><div class="overview-item-label">Undergrad Grad Rate</div><div class="overview-item-value">' + outcomes.gradRate + '</div></div>' : '') +
-          (outcomes.retention ? '<div class="overview-item"><div class="overview-item-label">Undergrad Retention</div><div class="overview-item-value">' + outcomes.retention + '</div></div>' : '') +
         '</div>' +
-        (_isProgSearch ? '<div style="margin-top:6px; font-size:0.75rem; color:var(--muted); padding:4px 8px; background:var(--surface); border-radius:6px;">&#9432; Tuition shown is the institutional rate. Graduate program tuition may differ. Grad rate and retention are undergraduate metrics.</div>' : '') +
+        (_isProgSearch ? '<div style="margin-top:6px; font-size:0.75rem; color:var(--muted); padding:4px 8px; background:var(--surface); border-radius:6px;">&#9432; Tuition shown is the institutional rate. Graduate program tuition may differ.</div>' : '') +
         '<div style="margin-top:8px; font-size:0.8rem; color:var(--muted);">Living cost based on BEA Regional Price Parities (2023). <a href="' + getMitLivingWageLink(state) + '" target="_blank" style="color:var(--accent);">View MIT Living Wage Calculator for ' + (US_STATES[state] || state) + ' &rarr;</a></div>' +
       '</div>';
 
@@ -2976,8 +2974,6 @@
           'latest.cost.tuition.out_of_state': school['latest.cost.tuition.out_of_state'],
           'latest.cost.avg_net_price.overall': school['latest.cost.avg_net_price.overall'],
           'latest.earnings.10_yrs_after_entry.mean_earnings': school['latest.earnings.10_yrs_after_entry.mean_earnings'],
-          'latest.completion.completion_rate_4yr_150nt': school['latest.completion.completion_rate_4yr_150nt'],
-          'latest.student.retention_rate.four_year.full_time': school['latest.student.retention_rate.four_year.full_time'],
           'latest.aid.median_debt.completers.overall': school['latest.aid.median_debt.completers.overall'],
           'latest.programs.cip_4_digit': school['latest.programs.cip_4_digit']
         });
@@ -3209,7 +3205,7 @@
       if (saved.length === 0 && savedApi.length === 0) { alert('No programs saved to export.'); return; }
 
       const savedPrograms = DATABASE.programs.filter(p => saved.includes(p.id));
-      const headers = ['School','City','State','Program','Degree','Department','Duration','Format','Tuition (In-State)','Tuition (Out-of-State)','Est. Living Cost (Annual)','Setting','Avg Earnings (10yr)','Graduation Rate','Retention Rate','Rankings','Min GPA','GRE','Essays / Statement of Purpose','Letters of Recommendation','Resume / CV Requirements','Transcripts','Language / English Proficiency','Prerequisites','Work Experience','Fall Deadline','Spring Deadline','Rolling','Application Fee','Other Requirements','Notes','Program Department Link','School Website'];
+      const headers = ['School','City','State','Program','Degree','Department','Duration','Format','Tuition (In-State)','Tuition (Out-of-State)','Est. Living Cost (Annual)','Setting','Avg Earnings (10yr)','Rankings','Min GPA','GRE','Essays / Statement of Purpose','Letters of Recommendation','Resume / CV Requirements','Transcripts','Language / English Proficiency','Prerequisites','Work Experience','Fall Deadline','Spring Deadline','Rolling','Application Fee','Other Requirements','Notes','Program Department Link','School Website'];
 
       const rows = [headers];
 
@@ -3265,7 +3261,7 @@
             inState, outState,
             '$' + getEstimatedLivingCost(state).toLocaleString(),
             setting,
-            outcomes.earnings || '', outcomes.gradRate || '', outcomes.retention || '',
+            outcomes.earnings || '',
             rankStr,
             'Check program website', 'Check program website', 'Statement of Purpose typically required',
             '2-3 letters typically required', 'Typically required', 'Official transcripts required',
@@ -3298,7 +3294,7 @@
               inState, outState,
               '$' + getEstimatedLivingCost(state).toLocaleString(),
               setting,
-              outcomes.earnings || '', outcomes.gradRate || '', outcomes.retention || '',
+              outcomes.earnings || '',
               fullRank,
               csvGpa, csvGre, csvSop,
               csvLor, csvResume, csvTranscripts,
@@ -3377,7 +3373,7 @@
       html += '<div class="subtitle">Generated on ' + dateStr + ' &middot; ' + totalCount + ' item' + (totalCount !== 1 ? 's' : '') + ' saved</div>';
 
       // Summary table
-      html += '<table><thead><tr><th>School</th><th>Program / Location</th><th>Tuition</th><th>Est. Living Cost</th><th>Setting</th><th>Avg Earnings</th><th>Grad Rate</th><th>Retention</th><th>Rankings</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>School</th><th>Program / Location</th><th>Tuition</th><th>Est. Living Cost</th><th>Setting</th><th>Avg Earnings</th><th>Rankings</th></tr></thead><tbody>';
 
       savedPrograms.forEach(function(prog) {
         var school = DATABASE.schools.find(function(s) { return s.id === prog.schoolId; });
@@ -3410,7 +3406,7 @@
           if (overallRank.the) parts.push('#' + overallRank.the + ' THE');
           rankStr = parts.join(', ');
         }
-        html += '<tr><td><strong>' + name + '</strong></td><td>' + city + ', ' + state + ' (' + gradCount + ' grad programs)</td><td>' + formatTuition(school) + '</td><td style="color:#0369a1;">' + formatLivingCost(state) + '</td><td>' + setting + '</td><td>' + (outcomes.earnings || 'N/A') + '</td><td>' + (outcomes.gradRate || 'N/A') + '</td><td>' + (outcomes.retention || 'N/A') + '</td><td>' + (rankStr || 'N/A') + '</td></tr>';
+        html += '<tr><td><strong>' + name + '</strong></td><td>' + city + ', ' + state + ' (' + gradCount + ' grad programs)</td><td>' + formatTuition(school) + '</td><td style="color:#0369a1;">' + formatLivingCost(state) + '</td><td>' + setting + '</td><td>' + (outcomes.earnings || 'N/A') + '</td><td>' + (rankStr || 'N/A') + '</td></tr>';
       });
 
       html += '</tbody></table>';
@@ -3482,8 +3478,6 @@
         html += '<div class="stat-item"><div class="stat-label">Est. Living Cost</div><div class="stat-value" style="color:#0369a1;">' + formatLivingCost(state) + '</div></div>';
         html += '<div class="stat-item"><div class="stat-label">Grad Programs</div><div class="stat-value">' + gradProgs.length + '</div></div>';
         if (outcomes.earnings) html += '<div class="stat-item"><div class="stat-label">Avg Earnings (10yr)</div><div class="stat-value green">' + outcomes.earnings + '</div></div>';
-        if (outcomes.gradRate) html += '<div class="stat-item"><div class="stat-label">Graduation Rate</div><div class="stat-value">' + outcomes.gradRate + '</div></div>';
-        if (outcomes.retention) html += '<div class="stat-item"><div class="stat-label">Retention Rate</div><div class="stat-value">' + outcomes.retention + '</div></div>';
         html += '</div>';
 
         // Admission Requirements Guide
@@ -3609,14 +3603,10 @@
     // Format school outcome metrics from Scorecard data
     function getSchoolOutcomes(school) {
       var earnings = school['latest.earnings.10_yrs_after_entry.mean_earnings'];
-      var gradRate = school['latest.completion.completion_rate_4yr_150nt'];
-      var retention = school['latest.student.retention_rate.four_year.full_time'];
       var debt = school['latest.aid.median_debt.completers.overall'];
       return {
         earnings: earnings ? '$' + Math.round(earnings).toLocaleString() : null,
         earningsRaw: earnings,
-        gradRate: gradRate ? (gradRate * 100).toFixed(0) + '%' : null,
-        retention: retention ? (retention * 100).toFixed(0) + '%' : null,
         debt: debt ? '$' + Math.round(debt).toLocaleString() : null
       };
     }
@@ -4047,8 +4037,6 @@
           'latest.cost.tuition.out_of_state',
           'latest.cost.avg_net_price.overall',
           'latest.earnings.10_yrs_after_entry.mean_earnings',
-          'latest.completion.completion_rate_4yr_150nt',
-          'latest.student.retention_rate.four_year.full_time',
           'latest.aid.median_debt.completers.overall',
           'latest.admissions.admission_rate.overall',
           'latest.programs.cip_4_digit'
@@ -5109,8 +5097,6 @@
           'latest.cost.tuition.out_of_state',
           'latest.cost.avg_net_price.overall',
           'latest.earnings.10_yrs_after_entry.mean_earnings',
-          'latest.completion.completion_rate_4yr_150nt',
-          'latest.student.retention_rate.four_year.full_time',
           'latest.aid.median_debt.completers.overall',
           'latest.admissions.admission_rate.overall',
           'latest.programs.cip_4_digit'
@@ -5196,7 +5182,6 @@
                 '<div class="school-stat"><div class="school-stat-label">Est. Living Cost</div><div class="school-stat-value" style="color:#0369a1;">' + formatLivingCost(state) + '</div></div>' +
                 '<div class="school-stat"><div class="school-stat-label">Grad Programs</div><div class="school-stat-value">' + gradCount + '</div></div>' +
                 (outcomes.earnings ? '<div class="school-stat"><div class="school-stat-label">Avg Salary (10yr)</div><div class="school-stat-value" style="color:#059669;">' + outcomes.earnings + '</div></div>' : '') +
-                (outcomes.gradRate ? '<div class="school-stat"><div class="school-stat-label">UG Grad Rate</div><div class="school-stat-value">' + outcomes.gradRate + '</div></div>' : '') +
               '</div>' +
               buildRankingDisplay(name, null) +
               '<a href="' + progLinkUrl + '" target="_blank" onclick="event.stopPropagation();" class="school-card-link" style="cursor:pointer; color:var(--accent); text-decoration:none;">' + progLinkLabel + ' &rarr;</a>' +
@@ -5228,8 +5213,6 @@
           'latest.cost.tuition.out_of_state',
           'latest.cost.avg_net_price.overall',
           'latest.earnings.10_yrs_after_entry.mean_earnings',
-          'latest.completion.completion_rate_4yr_150nt',
-          'latest.student.retention_rate.four_year.full_time',
           'latest.aid.median_debt.completers.overall',
           'latest.admissions.admission_rate.overall',
           'latest.programs.cip_4_digit'
