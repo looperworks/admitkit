@@ -1298,7 +1298,7 @@
     <section class="hero">
       <div class="container">
         <div class="hero-content">
-          <div class="hero-badge">Free Resource &mdash; 6,000+ US Schools &mdash; Live API Data</div>
+          <div class="hero-badge">Free Resource &mdash; 6,000+ US Schools &mdash; Live API Data &mdash; Updated Feb 2026</div>
           <h1>Find your path to<br><span class="gradient-text">graduate school.</span></h1>
           <p>Search admission requirements, deadlines, and program details for master's and doctoral programs at any US university. Powered by the U.S. Department of Education.</p>
 
@@ -1314,6 +1314,14 @@
               <option value="">All Degrees</option>
               <option value="Masters">Master's</option>
               <option value="Doctoral">Doctoral</option>
+            </select>
+            <select id="filter-region" class="search-select" onchange="var br=document.getElementById('browse-region'); if(br) br.value=this.value; handleRegionFilter();">
+              <option value="">All Regions</option>
+              <option value="Northeast">Northeast</option>
+              <option value="Southeast">Southeast</option>
+              <option value="Midwest">Midwest</option>
+              <option value="West">West</option>
+              <option value="Texas">Texas</option>
             </select>
             <button type="submit" class="btn-search" onclick="handleSearch(event)">Search</button>
           </form>
@@ -1385,6 +1393,21 @@
             <option value="On-campus">On-campus</option>
             <option value="Online">Online</option>
             <option value="Hybrid">Hybrid</option>
+          </select>
+          <select id="browse-region" class="search-select" onchange="handleRegionFilter()">
+            <option value="">All Regions</option>
+            <option value="Northeast">Northeast</option>
+            <option value="Southeast">Southeast</option>
+            <option value="Midwest">Midwest</option>
+            <option value="West">West</option>
+            <option value="Texas">Texas</option>
+          </select>
+          <select id="browse-ranking" class="search-select" onchange="handleRankingFilter()">
+            <option value="">Any Ranking</option>
+            <option value="10">Top 10</option>
+            <option value="25">Top 25</option>
+            <option value="50">Top 50</option>
+            <option value="100">Top 100</option>
           </select>
           <select id="search-sort" class="sort-dropdown" onchange="handleSort()" style="display:none;">
             <option value="relevance">Sort: Relevance</option>
@@ -1531,7 +1554,8 @@
         </div>
       </div>
       <div class="footer-bottom">
-        &copy; 2026 AdmitKit. All rights reserved.
+        &copy; 2026 AdmitKit. All rights reserved.<br>
+        <span style="font-size:0.75rem; opacity:0.7;">Curated data last updated: February 2026 &bull; API data is live from the U.S. Dept. of Education College Scorecard</span>
       </div>
     </div>
   </footer>
@@ -1798,6 +1822,22 @@
       'VT':'Vermont','VA':'Virginia','WA':'Washington','WV':'West Virginia','WI':'Wisconsin','WY':'Wyoming'
     };
 
+    // Geographic regions for filtering
+    var US_REGIONS = {
+      'Northeast': ['CT','DE','DC','ME','MD','MA','NH','NJ','NY','PA','RI','VT'],
+      'Southeast': ['AL','AR','FL','GA','KY','LA','MS','NC','SC','TN','VA','WV'],
+      'Midwest': ['IL','IN','IA','KS','MI','MN','MO','NE','ND','OH','SD','WI'],
+      'West': ['AK','AZ','CA','CO','HI','ID','MT','NV','NM','OR','UT','WA','WY'],
+      'Texas': ['TX']
+    };
+
+    function getRegionForState(stateCode) {
+      for (var region in US_REGIONS) {
+        if (US_REGIONS[region].indexOf(stateCode) >= 0) return region;
+      }
+      return null;
+    }
+
     function populateStates() {
       var stateKeys = Object.keys(US_STATES).sort();
       ['filter-state', 'browse-state'].forEach(id => {
@@ -1882,18 +1922,107 @@
         }
       }
 
+      // Also check CIP-based program matching for better relevance
+      // But skip CIP matching if query is a known school alias (e.g., "MIT" should not match "IT")
+      var isSchoolAlias = query && (SCHOOL_ALIASES[query] || expandedQuery !== query);
+      var cipMatch = (!isSchoolAlias && query) ? (PROGRAM_CIP_MAP[query] || null) : null;
+      if (!cipMatch && query && !isSchoolAlias) {
+        // Try word-boundary match against CIP map keys (longest first)
+        var _cipKeys = Object.keys(PROGRAM_CIP_MAP).sort(function(a,b){ return b.length - a.length; });
+        for (var _ci = 0; _ci < _cipKeys.length; _ci++) {
+          var _ck = _cipKeys[_ci];
+          // Only match if the CIP key appears as a whole word/phrase, not a substring of another word
+          if (_ck.length >= 3 && query === _ck) {
+            cipMatch = PROGRAM_CIP_MAP[_ck];
+            break;
+          }
+        }
+      }
+
       filteredPrograms = DATABASE.programs.filter(prog => {
         const school = DATABASE.schools.find(s => s.id === prog.schoolId);
-        const matchQuery = !query ||
-          prog.name.toLowerCase().includes(query) ||
-          school.name.toLowerCase().includes(query) ||
+        // Match against program name
+        var nameMatch = prog.name.toLowerCase().includes(query);
+        // Match against school name (including alias expansion)
+        var schoolMatch = school.name.toLowerCase().includes(query) ||
           (expandedQuery !== query && school.name.toLowerCase().includes(expandedQuery));
+        // Match against department name
+        var deptMatch = prog.department && prog.department.toLowerCase().includes(query);
+        // Match against CIP code (e.g., searching "journalism" matches CIP 0904)
+        var cipCodeMatch = cipMatch && cipMatch.cip && cipMatch.cip.indexOf(prog.cipCode) >= 0;
+
+        // If query matches a known program field (CIP), only show programs that match that CIP
+        // Don't show unrelated programs just because they're at a matching school
+        var matchQuery;
+        if (!query) {
+          matchQuery = true;
+        } else if (cipMatch) {
+          // Program-specific search: require CIP match, or program name match
+          matchQuery = cipCodeMatch || nameMatch;
+        } else {
+          // General search: match school name, program name, or department
+          matchQuery = nameMatch || schoolMatch || deptMatch;
+        }
+
         const matchState = !state || school.state === state;
         const matchDegree = !degree || prog.degreeType === degree;
         return matchQuery && matchState && matchDegree;
       });
       currentPage = 1;
       renderCards();
+    }
+
+    // Active region and ranking filters (applied to both curated + API results)
+    var _activeRegionFilter = '';
+    var _activeRankingFilter = 0;
+
+    function handleRegionFilter() {
+      var region = document.getElementById('browse-region').value;
+      _activeRegionFilter = region;
+      // If region is selected, clear individual state filter (region overrides)
+      if (region) {
+        document.getElementById('browse-state').value = '';
+        document.getElementById('filter-state').value = '';
+      }
+      // Re-run the current search/filter
+      var query = document.getElementById('search-query').value.trim();
+      if (query || _lastSearchContext) {
+        handleSearch(new Event('submit'));
+      } else {
+        applyFilters();
+      }
+    }
+
+    function handleRankingFilter() {
+      var rank = document.getElementById('browse-ranking').value;
+      _activeRankingFilter = rank ? parseInt(rank) : 0;
+      // Re-run the current search/filter
+      var query = document.getElementById('search-query').value.trim();
+      if (query || _lastSearchContext) {
+        handleSearch(new Event('submit'));
+      } else {
+        applyFilters();
+      }
+    }
+
+    function schoolMatchesRankingFilter(schoolName) {
+      if (!_activeRankingFilter) return true;
+      var key = schoolName.toLowerCase();
+      var r = RANKINGS_DATA[key];
+      if (!r) {
+        // Try fuzzy match
+        for (var rk in RANKINGS_DATA) {
+          if (key.indexOf(rk) >= 0 || rk.indexOf(key) >= 0) { r = RANKINGS_DATA[rk]; break; }
+        }
+      }
+      if (!r) return false; // No ranking data = filtered out when ranking filter is active
+      return r.un && r.un <= _activeRankingFilter;
+    }
+
+    function stateMatchesRegionFilter(stateCode) {
+      if (!_activeRegionFilter) return true;
+      var regionStates = US_REGIONS[_activeRegionFilter];
+      return regionStates && regionStates.indexOf(stateCode) >= 0;
     }
 
     function applyFilters() {
@@ -1905,7 +2034,9 @@
         const school = DATABASE.schools.find(s => s.id === prog.schoolId);
         return (!state || school.state === state) &&
                (!degree || prog.degreeType === degree) &&
-               (!format || prog.format === format);
+               (!format || prog.format === format) &&
+               stateMatchesRegionFilter(school.state) &&
+               schoolMatchesRankingFilter(school.name);
       });
       currentPage = 1;
       renderCards();
@@ -2180,6 +2311,8 @@
       var inStateTuition = school['latest.cost.tuition.in_state'];
       var outStateTuition = school['latest.cost.tuition.out_of_state'];
       var tuitionStr = formatTuition(school);
+      var acceptanceRate = school['latest.admissions.admission_rate.overall'];
+      var avgNetPrice = school['latest.cost.avg_net_price.overall'];
 
       // Check if this school has curated data in our DATABASE
       var curatedSchool = DATABASE.schools.find(function(s) {
@@ -2212,32 +2345,73 @@
         modalSaveBtn.innerHTML = '&#9733; Save';
       }
 
+      // Identify program-specific data from matched CIP programs
+      var _isProgSearch = !!_lastSearchProgramLabel;
+      var _matchedCipProgs = [];
+      if (_isProgSearch) {
+        var _sl = _lastSearchProgramLabel.toLowerCase();
+        _matchedCipProgs = programs.filter(function(p) {
+          var t = (p.title || '').toLowerCase();
+          return t.indexOf(_sl) >= 0 || _sl.indexOf(t) >= 0;
+        });
+        // Also match by CIP code if available from last search context
+        if (_matchedCipProgs.length === 0 && _lastSearchContext && _lastSearchContext.args) {
+          var _a = _lastSearchContext.args[0];
+          if (_a && _a.cipCodes) {
+            _matchedCipProgs = programs.filter(function(p) {
+              for (var ci = 0; ci < _a.cipCodes.length; ci++) {
+                if (p.code === _a.cipCodes[ci] && p.credential && (p.credential.level === 5 || p.credential.level === 6)) return true;
+              }
+              return false;
+            });
+          }
+        }
+      }
+      var _modalProgEarnings = getProgramEarnings(_matchedCipProgs);
+      var _modalProgDebt = getProgramDebt(_matchedCipProgs);
+
       // Build tuition display for modal (more detailed than card)
+      var tuitionLabelSuffix = _isProgSearch ? ' (Institutional)' : '';
       var tuitionDetailHtml = '';
       if (inStateTuition && outStateTuition && inStateTuition !== outStateTuition) {
-        tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">In-State Tuition</div><div class="overview-item-value">$' + inStateTuition.toLocaleString() + '</div></div>' +
-          '<div class="overview-item"><div class="overview-item-label">Out-of-State Tuition</div><div class="overview-item-value">$' + outStateTuition.toLocaleString() + '</div></div>';
+        tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">In-State Tuition' + tuitionLabelSuffix + '</div><div class="overview-item-value">$' + inStateTuition.toLocaleString() + '</div></div>' +
+          '<div class="overview-item"><div class="overview-item-label">Out-of-State Tuition' + tuitionLabelSuffix + '</div><div class="overview-item-value">$' + outStateTuition.toLocaleString() + '</div></div>';
       } else if (outStateTuition) {
-        tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">Tuition</div><div class="overview-item-value">$' + outStateTuition.toLocaleString() + '</div></div>';
+        tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">Tuition' + tuitionLabelSuffix + '</div><div class="overview-item-value">$' + outStateTuition.toLocaleString() + '</div></div>';
       } else if (inStateTuition) {
-        tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">Tuition</div><div class="overview-item-value">$' + inStateTuition.toLocaleString() + '</div></div>';
+        tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">Tuition' + tuitionLabelSuffix + '</div><div class="overview-item-value">$' + inStateTuition.toLocaleString() + '</div></div>';
       } else {
         tuitionDetailHtml = '<div class="overview-item"><div class="overview-item-label">Tuition</div><div class="overview-item-value">N/A</div></div>';
       }
 
       var outcomes = getSchoolOutcomes(school);
 
+      // Build program-specific earnings section (shown prominently when available)
+      var progEarningsHtml = '';
+      if (_modalProgEarnings) {
+        progEarningsHtml += '<div class="overview-item"><div class="overview-item-label">' + _modalProgEarnings.label + '</div><div class="overview-item-value" style="color:#059669;font-weight:700;">' + _modalProgEarnings.value + '</div></div>';
+      }
+      if (_modalProgDebt) {
+        progEarningsHtml += '<div class="overview-item"><div class="overview-item-label">Median Grad Debt</div><div class="overview-item-value" style="color:#b45309;font-weight:700;">' + _modalProgDebt.value + '</div></div>';
+      }
+
       var html = '<div class="modal-section">' +
         '<h3>School Overview</h3>' +
         '<div class="overview-grid">' +
+          '<div class="overview-item"><div class="overview-item-label">Type</div><div class="overview-item-value">' + ownershipLabel + '</div></div>' +
           '<div class="overview-item"><div class="overview-item-label">Setting</div><div class="overview-item-value">' + setting + '</div></div>' +
+          (acceptanceRate ? '<div class="overview-item"><div class="overview-item-label">Acceptance Rate</div><div class="overview-item-value" style="font-weight:700; color:' + (acceptanceRate < 0.2 ? '#dc2626' : acceptanceRate < 0.5 ? '#d97706' : '#059669') + ';">' + (acceptanceRate * 100).toFixed(0) + '%</div></div>' : '') +
           tuitionDetailHtml +
+          (avgNetPrice ? '<div class="overview-item"><div class="overview-item-label">Avg Net Price</div><div class="overview-item-value" style="color:#059669;">$' + Math.round(avgNetPrice).toLocaleString() + '</div></div>' : '') +
           '<div class="overview-item"><div class="overview-item-label">Grad Programs</div><div class="overview-item-value">' + (masterProgs.length + doctoralProgs.length) + '</div></div>' +
           '<div class="overview-item"><div class="overview-item-label">Est. Living Cost (Annual)</div><div class="overview-item-value" style="color:#0369a1;font-weight:700;">' + formatLivingCost(state) + '</div></div>' +
-          (outcomes.earnings ? '<div class="overview-item"><div class="overview-item-label">Avg Earnings (10yr)</div><div class="overview-item-value" style="color:var(--success);font-weight:700;">' + outcomes.earnings + '</div></div>' : '') +
-          (outcomes.gradRate ? '<div class="overview-item"><div class="overview-item-label">Graduation Rate</div><div class="overview-item-value">' + outcomes.gradRate + '</div></div>' : '') +
-          (outcomes.retention ? '<div class="overview-item"><div class="overview-item-label">Retention Rate</div><div class="overview-item-value">' + outcomes.retention + '</div></div>' : '') +
+          progEarningsHtml +
+          (!_modalProgEarnings && outcomes.earnings ? '<div class="overview-item"><div class="overview-item-label">Avg Earnings (10yr, All Students)</div><div class="overview-item-value" style="color:var(--success);font-weight:700;">' + outcomes.earnings + '</div></div>' : '') +
+          (outcomes.debt ? '<div class="overview-item"><div class="overview-item-label">Median Debt (All)</div><div class="overview-item-value">' + outcomes.debt + '</div></div>' : '') +
+          (outcomes.gradRate ? '<div class="overview-item"><div class="overview-item-label">Undergrad Grad Rate</div><div class="overview-item-value">' + outcomes.gradRate + '</div></div>' : '') +
+          (outcomes.retention ? '<div class="overview-item"><div class="overview-item-label">Undergrad Retention</div><div class="overview-item-value">' + outcomes.retention + '</div></div>' : '') +
         '</div>' +
+        (_isProgSearch ? '<div style="margin-top:6px; font-size:0.75rem; color:var(--muted); padding:4px 8px; background:var(--surface); border-radius:6px;">&#9432; Tuition shown is the institutional rate. Graduate program tuition may differ. Grad rate and retention are undergraduate metrics.</div>' : '') +
         '<div style="margin-top:8px; font-size:0.8rem; color:var(--muted);">Living cost based on BEA Regional Price Parities (2023). <a href="' + getMitLivingWageLink(state) + '" target="_blank" style="color:var(--accent);">View MIT Living Wage Calculator for ' + (US_STATES[state] || state) + ' &rarr;</a></div>' +
       '</div>';
 
@@ -2300,52 +2474,91 @@
         });
       }
 
-      // ── Show API program list for non-curated programs ──
-      if (masterProgs.length > 0) {
-        html += '<div class="modal-section"><h3>All Master\'s Programs (' + masterProgs.length + ')</h3><div class="checklist-grid">';
-        masterProgs.sort(function(a,b) { return (a.title || '').localeCompare(b.title || ''); });
-        masterProgs.forEach(function(p) {
-          var pTitle = p.title || 'Unknown Program';
-          var deptUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' admissions program');
-          var essayUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' statement of purpose essay prompt application requirements');
-          var deadlineUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' application deadline tuition');
-          html += '<div class="checklist-item" style="align-items:flex-start;">' +
-            '<div class="checklist-icon">\uD83C\uDF93</div>' +
-            '<div class="checklist-content">' +
-              '<div class="checklist-label">' + pTitle + '</div>' +
-              '<div class="checklist-detail">' + (p.credential.title || 'Master\'s degree') + '</div>' +
-              '<div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">' +
-                '<a href="' + deptUrl + '" target="_blank" style="font-size:0.7rem; padding:2px 8px; background:var(--accent); color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Program page</a>' +
-                '<a href="' + essayUrl + '" target="_blank" style="font-size:0.7rem; padding:2px 8px; background:#d97706; color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Essay / SOP</a>' +
-                '<a href="' + deadlineUrl + '" target="_blank" style="font-size:0.7rem; padding:2px 8px; background:#059669; color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Deadlines</a>' +
-              '</div>' +
+      // ── Show API program list — highlight searched program first ──
+      // Helper to build a program card
+      function buildProgCard(p, isHighlighted) {
+        var pTitle = p.title || 'Unknown Program';
+        var deptUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' admissions program');
+        var essayUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' statement of purpose essay prompt application requirements');
+        var deadlineUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' application deadline tuition');
+        var highlightStyle = isHighlighted ? 'border: 2px solid var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 10px;' : '';
+        var badge = isHighlighted ? '<span style="font-size:0.65rem; padding:2px 8px; background:var(--accent); color:#fff; border-radius:10px; margin-left:6px;">Searched</span>' : '';
+        // Extract program-specific earnings/debt for this program
+        var _pe = getProgramEarnings([p]);
+        var _pd = getProgramDebt([p]);
+        var earningsLine = '';
+        if (_pe || _pd) {
+          earningsLine = '<div style="display:flex; gap:10px; margin-top:3px; font-size:0.75rem;">';
+          if (_pe) earningsLine += '<span style="color:#059669; font-weight:600;">' + _pe.label + ': ' + _pe.value + '</span>';
+          if (_pd) earningsLine += '<span style="color:#b45309; font-weight:600;">Median Debt: ' + _pd.value + '</span>';
+          earningsLine += '</div>';
+        }
+        return '<div class="checklist-item" style="align-items:flex-start;' + highlightStyle + '">' +
+          '<div class="checklist-icon">\uD83C\uDF93</div>' +
+          '<div class="checklist-content">' +
+            '<div class="checklist-label">' + pTitle + badge + '</div>' +
+            '<div class="checklist-detail">' + (p.credential.title || 'Graduate degree') + '</div>' +
+            earningsLine +
+            '<div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">' +
+              '<a href="' + deptUrl + '" target="_blank" rel="noopener noreferrer" style="font-size:0.7rem; padding:2px 8px; background:var(--accent); color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Program page</a>' +
+              '<a href="' + essayUrl + '" target="_blank" rel="noopener noreferrer" style="font-size:0.7rem; padding:2px 8px; background:#d97706; color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Essay / SOP</a>' +
+              '<a href="' + deadlineUrl + '" target="_blank" rel="noopener noreferrer" style="font-size:0.7rem; padding:2px 8px; background:#059669; color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Deadlines</a>' +
             '</div>' +
-          '</div>';
-        });
+          '</div>' +
+        '</div>';
+      }
+
+      // Determine which programs match the user's search
+      var searchLabel = (_lastSearchProgramLabel || '').toLowerCase();
+      function isSearchMatch(prog) {
+        if (!searchLabel) return false;
+        var title = (prog.title || '').toLowerCase();
+        return title.indexOf(searchLabel) >= 0 || searchLabel.indexOf(title) >= 0;
+      }
+
+      // Split programs into matched vs other
+      var matchedMasters = masterProgs.filter(isSearchMatch);
+      var otherMasters = masterProgs.filter(function(p) { return !isSearchMatch(p); });
+      var matchedDoctoral = doctoralProgs.filter(isSearchMatch);
+      var otherDoctoral = doctoralProgs.filter(function(p) { return !isSearchMatch(p); });
+
+      // Show matched programs first in a highlighted section
+      if (matchedMasters.length > 0 || matchedDoctoral.length > 0) {
+        var matchedAll = matchedMasters.concat(matchedDoctoral);
+        html += '<div class="modal-section"><h3>' + _lastSearchProgramLabel + ' Programs at ' + name + ' (' + matchedAll.length + ')</h3><div class="checklist-grid">';
+        matchedAll.forEach(function(p) { html += buildProgCard(p, true); });
         html += '</div></div>';
       }
 
-      if (doctoralProgs.length > 0) {
+      // Show other master's programs in a collapsible section
+      if (otherMasters.length > 0) {
+        otherMasters.sort(function(a,b) { return (a.title || '').localeCompare(b.title || ''); });
+        var showByDefault = !searchLabel; // Only expand if user wasn't searching a specific program
+        html += '<div class="modal-section"><h3 onclick="var el=this.nextElementSibling; el.style.display=el.style.display===\'none\'?\'block\':\'none\'; this.querySelector(\'span\').textContent=el.style.display===\'none\'?\'\u25B6\':\'\u25BC\';" style="cursor:pointer;">Other Master\'s Programs (' + otherMasters.length + ') <span style="font-size:0.75rem;">' + (showByDefault ? '\u25BC' : '\u25B6') + '</span></h3><div class="checklist-grid" style="display:' + (showByDefault ? 'block' : 'none') + ';">';
+        otherMasters.forEach(function(p) { html += buildProgCard(p, false); });
+        html += '</div></div>';
+      }
+
+      if (otherDoctoral.length > 0) {
+        otherDoctoral.sort(function(a,b) { return (a.title || '').localeCompare(b.title || ''); });
+        var showByDefault2 = !searchLabel;
+        html += '<div class="modal-section"><h3 onclick="var el=this.nextElementSibling; el.style.display=el.style.display===\'none\'?\'block\':\'none\'; this.querySelector(\'span\').textContent=el.style.display===\'none\'?\'\u25B6\':\'\u25BC\';" style="cursor:pointer;">Other Doctoral Programs (' + otherDoctoral.length + ') <span style="font-size:0.75rem;">' + (showByDefault2 ? '\u25BC' : '\u25B6') + '</span></h3><div class="checklist-grid" style="display:' + (showByDefault2 ? 'block' : 'none') + ';">';
+        otherDoctoral.forEach(function(p) { html += buildProgCard(p, false); });
+        html += '</div></div>';
+      }
+
+      // Legacy fallback - if no search label, show all (backward compatible)
+      if (!searchLabel && masterProgs.length > 0 && matchedMasters.length === 0) {
+        html += '<div class="modal-section"><h3>All Master\'s Programs (' + masterProgs.length + ')</h3><div class="checklist-grid">';
+        masterProgs.sort(function(a,b) { return (a.title || '').localeCompare(b.title || ''); });
+        masterProgs.forEach(function(p) { html += buildProgCard(p, false); });
+        html += '</div></div>';
+      }
+
+      if (!searchLabel && doctoralProgs.length > 0 && matchedDoctoral.length === 0) {
         html += '<div class="modal-section"><h3>All Doctoral Programs (' + doctoralProgs.length + ')</h3><div class="checklist-grid">';
         doctoralProgs.sort(function(a,b) { return (a.title || '').localeCompare(b.title || ''); });
-        doctoralProgs.forEach(function(p) {
-          var pTitle = p.title || 'Unknown Program';
-          var deptUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' admissions program');
-          var essayUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' statement of purpose essay prompt application requirements');
-          var deadlineUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + pTitle + ' application deadline tuition');
-          html += '<div class="checklist-item" style="align-items:flex-start;">' +
-            '<div class="checklist-icon">\uD83D\uDCDA</div>' +
-            '<div class="checklist-content">' +
-              '<div class="checklist-label">' + pTitle + '</div>' +
-              '<div class="checklist-detail">' + (p.credential.title || 'Doctoral degree') + '</div>' +
-              '<div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">' +
-                '<a href="' + deptUrl + '" target="_blank" style="font-size:0.7rem; padding:2px 8px; background:var(--accent); color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Program page</a>' +
-                '<a href="' + essayUrl + '" target="_blank" style="font-size:0.7rem; padding:2px 8px; background:#d97706; color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Essay / SOP</a>' +
-                '<a href="' + deadlineUrl + '" target="_blank" style="font-size:0.7rem; padding:2px 8px; background:#059669; color:#fff; border-radius:10px; text-decoration:none; white-space:nowrap;">Deadlines</a>' +
-              '</div>' +
-            '</div>' +
-          '</div>';
-        });
+        doctoralProgs.forEach(function(p) { html += buildProgCard(p, false); });
         html += '</div></div>';
       }
 
@@ -2632,6 +2845,68 @@
       return getSavedPrograms().includes(programId);
     }
 
+    // ─── Application Tracking ─────────────────────────────────────────
+    // Stores status + notes for each saved program/school
+    var APP_STATUSES = [
+      { value: '', label: 'No Status', color: '#9ca3af' },
+      { value: 'researching', label: 'Researching', color: '#6366f1' },
+      { value: 'preparing', label: 'Preparing Materials', color: '#0891b2' },
+      { value: 'applied', label: 'Applied', color: '#d97706' },
+      { value: 'interview', label: 'Interview Scheduled', color: '#7c3aed' },
+      { value: 'accepted', label: 'Accepted', color: '#059669' },
+      { value: 'waitlisted', label: 'Waitlisted', color: '#ea580c' },
+      { value: 'rejected', label: 'Not Accepted', color: '#dc2626' },
+      { value: 'declined', label: 'Offer Declined', color: '#6b7280' }
+    ];
+
+    function getAppTracker() {
+      try { return JSON.parse(localStorage.getItem('ak-app-tracker') || '{}'); } catch(e) { return {}; }
+    }
+    function saveAppTracker(data) {
+      try { localStorage.setItem('ak-app-tracker', JSON.stringify(data)); } catch(e) {}
+    }
+    function getTrackingKey(type, id) {
+      return type + ':' + id; // e.g., "curated:5" or "api:MIT|MA"
+    }
+    function getTracking(trackKey) {
+      var tracker = getAppTracker();
+      return tracker[trackKey] || { status: '', notes: '' };
+    }
+    function updateTrackingStatus(trackKey, newStatus) {
+      var tracker = getAppTracker();
+      if (!tracker[trackKey]) tracker[trackKey] = { status: '', notes: '' };
+      tracker[trackKey].status = newStatus;
+      tracker[trackKey].updatedAt = new Date().toISOString();
+      saveAppTracker(tracker);
+      renderSavedPage(); // Re-render to update badge colors
+    }
+    function updateTrackingNotes(trackKey, notes) {
+      var tracker = getAppTracker();
+      if (!tracker[trackKey]) tracker[trackKey] = { status: '', notes: '' };
+      tracker[trackKey].notes = notes;
+      tracker[trackKey].updatedAt = new Date().toISOString();
+      saveAppTracker(tracker);
+    }
+
+    function buildTrackingUI(trackKey) {
+      var tracking = getTracking(trackKey);
+      var statusObj = APP_STATUSES.find(function(s) { return s.value === tracking.status; }) || APP_STATUSES[0];
+      var optionsHtml = APP_STATUSES.map(function(s) {
+        return '<option value="' + s.value + '"' + (s.value === tracking.status ? ' selected' : '') + '>' + s.label + '</option>';
+      }).join('');
+
+      return '<div style="margin-top:8px; border-top: 1px dashed var(--border); padding-top: 8px;" onclick="event.stopPropagation();">' +
+        '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">' +
+          '<span style="font-size:0.7rem; font-weight:600; color:var(--muted);">Status:</span>' +
+          '<select onchange="updateTrackingStatus(\'' + trackKey + '\', this.value)" style="font-size:0.72rem; padding:2px 6px; border:1px solid var(--border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); cursor:pointer;">' + optionsHtml + '</select>' +
+          (statusObj.value ? '<span style="display:inline-block; font-size:0.65rem; padding:1px 7px; background:' + statusObj.color + '; color:#fff; border-radius:8px; font-weight:600;">' + statusObj.label + '</span>' : '') +
+        '</div>' +
+        '<div style="margin-top:4px;">' +
+          '<textarea onblur="updateTrackingNotes(\'' + trackKey + '\', this.value)" onclick="event.stopPropagation();" placeholder="Add notes..." style="width:100%; font-size:0.75rem; padding:4px 6px; border:1px solid var(--border); border-radius:6px; background:var(--input-bg); color:var(--text-primary); resize:vertical; min-height:24px; max-height:80px; font-family:var(--font);">' + (tracking.notes || '').replace(/</g, '&lt;') + '</textarea>' +
+        '</div>' +
+      '</div>';
+    }
+
     function toggleSave(programId) {
       const saved = getSavedPrograms();
       const idx = saved.indexOf(programId);
@@ -2822,10 +3097,31 @@
       const grid = document.getElementById('saved-cards-grid');
       const savedPrograms = DATABASE.programs.filter(p => saved.includes(p.id));
 
+      // Application tracking summary
+      var tracker = getAppTracker();
+      var statusCounts = {};
+      APP_STATUSES.forEach(function(s) { if (s.value) statusCounts[s.value] = 0; });
+      Object.keys(tracker).forEach(function(k) {
+        var st = tracker[k].status;
+        if (st && statusCounts[st] !== undefined) statusCounts[st]++;
+      });
+      var summaryHtml = '';
+      var hasAnyStatus = Object.keys(statusCounts).some(function(k) { return statusCounts[k] > 0; });
+      if (hasAnyStatus) {
+        summaryHtml = '<div style="grid-column: 1 / -1; display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">';
+        APP_STATUSES.forEach(function(s) {
+          if (s.value && statusCounts[s.value] > 0) {
+            summaryHtml += '<span style="font-size:0.72rem; padding:3px 10px; background:' + s.color + '; color:#fff; border-radius:12px; font-weight:600;">' + s.label + ': ' + statusCounts[s.value] + '</span>';
+          }
+        });
+        summaryHtml += '</div>';
+      }
+
       // Curated program cards
-      var cardsHtml = savedPrograms.map(prog => {
+      var cardsHtml = summaryHtml + savedPrograms.map(prog => {
         const school = DATABASE.schools.find(s => s.id === prog.schoolId);
         const tuition = prog.tuitionInState ? '$' + (prog.tuitionInState / 1000).toFixed(0) + 'K' : 'N/A';
+        var trackKey = getTrackingKey('curated', prog.id);
         return '<div class="card" onclick="openModal(' + prog.id + ')" style="position:relative;">' +
           '<button class="bookmark-btn saved" onclick="event.stopPropagation(); toggleSave(' + prog.id + ');" title="Remove from saved" aria-label="Remove program">&#9733;</button>' +
           '<div class="card-school">' + school.name + '</div>' +
@@ -2836,6 +3132,7 @@
             '<span class="tag">' + prog.duration + '</span>' +
           '</div>' +
           '<div class="card-info"><strong>Tuition:</strong> ' + tuition + ' &middot; <strong>Dept:</strong> ' + prog.department + '</div>' +
+          buildTrackingUI(trackKey) +
           '<span class="card-cta">View requirements &rarr;</span>' +
         '</div>';
       }).join('');
@@ -2868,6 +3165,7 @@
             savedProgUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' graduate admissions programs');
           }
 
+          var apiTrackKey = getTrackingKey('api', getApiSchoolKey(school));
           return '<div class="school-card" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
             '<button class="bookmark-btn saved" onclick="event.stopPropagation(); toggleSaveApiSchool(\'' + cacheKey + '\'); renderSavedPage();" title="Remove from saved" aria-label="Remove school">&#9733;</button>' +
             '<div class="school-card-name">' + name + '</div>' +
@@ -2878,10 +3176,9 @@
               '<div class="school-stat"><div class="school-stat-label">Est. Living Cost</div><div class="school-stat-value" style="color:#0369a1;">' + formatLivingCost(state) + '</div></div>' +
               '<div class="school-stat"><div class="school-stat-label">Grad Programs</div><div class="school-stat-value">' + gradPrograms.length + '</div></div>' +
               (outcomes.earnings ? '<div class="school-stat"><div class="school-stat-label">Avg Salary (10yr)</div><div class="school-stat-value" style="color:#059669;">' + outcomes.earnings + '</div></div>' : '') +
-              (outcomes.gradRate ? '<div class="school-stat"><div class="school-stat-label">Grad Rate</div><div class="school-stat-value">' + outcomes.gradRate + '</div></div>' : '') +
-              (outcomes.retention ? '<div class="school-stat"><div class="school-stat-label">Retention</div><div class="school-stat-value">' + outcomes.retention + '</div></div>' : '') +
             '</div>' +
             buildRankingDisplay(name, null) +
+            buildTrackingUI(apiTrackKey) +
             '<a href="' + savedProgUrl + '" target="_blank" onclick="event.stopPropagation();" class="school-card-link" style="cursor:pointer; color:var(--accent); text-decoration:none;">' + savedProgLabel + ' &rarr;</a>' +
           '</div>';
         }).join('');
@@ -3344,6 +3641,39 @@
       return fips ? 'https://livingwage.mit.edu/states/' + fips : 'https://livingwage.mit.edu/';
     }
 
+    // ─── Program-Level Data Extraction ────────────────────────────────────
+    // Extracts earnings data from matched CIP program objects (not institution-level)
+    function getProgramEarnings(matchingProgs) {
+      if (!matchingProgs || matchingProgs.length === 0) return null;
+      for (var i = 0; i < matchingProgs.length; i++) {
+        var p = matchingProgs[i];
+        if (p.earnings) {
+          var e4 = p.earnings['4_yr'] ? p.earnings['4_yr'].mean_earnings : null;
+          var e1 = p.earnings['1_yr'] ? p.earnings['1_yr'].mean_earnings : null;
+          if (e4) return { value: '$' + Math.round(e4).toLocaleString(), label: 'Avg Salary (4yr post-grad)', raw: e4 };
+          if (e1) return { value: '$' + Math.round(e1).toLocaleString(), label: 'Avg Salary (1yr post-grad)', raw: e1 };
+        }
+      }
+      return null;
+    }
+
+    function getProgramDebt(matchingProgs) {
+      if (!matchingProgs || matchingProgs.length === 0) return null;
+      for (var i = 0; i < matchingProgs.length; i++) {
+        var p = matchingProgs[i];
+        if (p.debt && p.debt.median_debt) {
+          return { value: '$' + Math.round(p.debt.median_debt).toLocaleString(), raw: p.debt.median_debt };
+        }
+      }
+      return null;
+    }
+
+    function getCredentialBadge(degreeLevel) {
+      if (degreeLevel === 5) return '<span style="display:inline-block; font-size:0.65rem; padding:1px 7px; background:#7c3aed; color:#fff; border-radius:8px; font-weight:600; vertical-align:middle;">Master&#39;s</span>';
+      if (degreeLevel === 6 || degreeLevel === 7 || degreeLevel === 8) return '<span style="display:inline-block; font-size:0.65rem; padding:1px 7px; background:#b45309; color:#fff; border-radius:8px; font-weight:600; vertical-align:middle;">Doctoral</span>';
+      return '';
+    }
+
     // ─── Program-Specific Admission Requirements ─────────────────────────
     // Maps program fields to their typical department-specific requirements
     var PROGRAM_REQUIREMENTS = {
@@ -3716,6 +4046,7 @@
           'latest.completion.completion_rate_4yr_150nt',
           'latest.student.retention_rate.four_year.full_time',
           'latest.aid.median_debt.completers.overall',
+          'latest.admissions.admission_rate.overall',
           'latest.programs.cip_4_digit'
         ].join(',');
 
@@ -3736,8 +4067,16 @@
           results = applySortToResults(results, _currentSortMode);
         }
 
+        // Apply region and ranking filters (client-side post-filter)
+        if (_activeRegionFilter) {
+          results = results.filter(function(s) { return stateMatchesRegionFilter(s['school.state']); });
+        }
+        if (_activeRankingFilter) {
+          results = results.filter(function(s) { return schoolMatchesRankingFilter(s['school.name'] || ''); });
+        }
+
         if (results.length === 0) {
-          container.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">&#128269;</div><p>No schools found. Try a different name.</p></div>';
+          container.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">&#128269;</div><p>No schools found. Try a different name or adjust your filters.</p></div>';
           return;
         }
 
@@ -4768,6 +5107,7 @@
           'latest.completion.completion_rate_4yr_150nt',
           'latest.student.retention_rate.four_year.full_time',
           'latest.aid.median_debt.completers.overall',
+          'latest.admissions.admission_rate.overall',
           'latest.programs.cip_4_digit'
         ].join(',');
 
@@ -4789,13 +5129,21 @@
           results = applySortToResults(results, _currentSortMode);
         }
 
+        // Apply region and ranking filters (client-side post-filter)
+        if (_activeRegionFilter) {
+          results = results.filter(function(s) { return stateMatchesRegionFilter(s['school.state']); });
+        }
+        if (_activeRankingFilter) {
+          results = results.filter(function(s) { return schoolMatchesRankingFilter(s['school.name'] || ''); });
+        }
+
         if (results.length === 0) {
           var searchDesc = schoolName || '';
           if (stateFilter) searchDesc += (searchDesc ? ' in ' : 'schools in ') + (US_STATES[stateFilter] || stateFilter);
           grid.innerHTML = `
             <div class="empty-state" style="grid-column: 1 / -1">
               <div class="empty-state-icon">&#128269;</div>
-              <p>No schools found for "${searchDesc}". Try a different search.</p>
+              <p>No schools found for "${searchDesc}". Try a different search or adjust your filters.</p>
             </div>`;
           if (countEl) countEl.textContent = '0 results';
           return;
@@ -4843,7 +5191,7 @@
                 '<div class="school-stat"><div class="school-stat-label">Est. Living Cost</div><div class="school-stat-value" style="color:#0369a1;">' + formatLivingCost(state) + '</div></div>' +
                 '<div class="school-stat"><div class="school-stat-label">Grad Programs</div><div class="school-stat-value">' + gradCount + '</div></div>' +
                 (outcomes.earnings ? '<div class="school-stat"><div class="school-stat-label">Avg Salary (10yr)</div><div class="school-stat-value" style="color:#059669;">' + outcomes.earnings + '</div></div>' : '') +
-                (outcomes.gradRate ? '<div class="school-stat"><div class="school-stat-label">Grad Rate</div><div class="school-stat-value">' + outcomes.gradRate + '</div></div>' : '') +
+                (outcomes.gradRate ? '<div class="school-stat"><div class="school-stat-label">UG Grad Rate</div><div class="school-stat-value">' + outcomes.gradRate + '</div></div>' : '') +
               '</div>' +
               buildRankingDisplay(name, null) +
               '<a href="' + progLinkUrl + '" target="_blank" onclick="event.stopPropagation();" class="school-card-link" style="cursor:pointer; color:var(--accent); text-decoration:none;">' + progLinkLabel + ' &rarr;</a>' +
@@ -4878,6 +5226,7 @@
           'latest.completion.completion_rate_4yr_150nt',
           'latest.student.retention_rate.four_year.full_time',
           'latest.aid.median_debt.completers.overall',
+          'latest.admissions.admission_rate.overall',
           'latest.programs.cip_4_digit'
         ].join(',');
 
@@ -4919,7 +5268,15 @@
           results = applySortToResults(results, _currentSortMode);
         }
 
-        var total = data.metadata ? data.metadata.total : results.length;
+        // Apply region and ranking filters (client-side post-filter)
+        if (_activeRegionFilter) {
+          results = results.filter(function(s) { return stateMatchesRegionFilter(s['school.state']); });
+        }
+        if (_activeRankingFilter) {
+          results = results.filter(function(s) { return schoolMatchesRankingFilter(s['school.name'] || ''); });
+        }
+
+        var total = (_activeRegionFilter || _activeRankingFilter) ? results.length : (data.metadata ? data.metadata.total : results.length);
 
         if (results.length === 0) {
           var searchDesc = analysis.cipLabel || 'this program';
@@ -4973,23 +5330,27 @@
             var progDisplay = progNames.length > 0 ? progNames.slice(0, 3).join(', ') : analysis.cipLabel;
 
             var apiSaved = isApiSchoolSaved(school);
-            var outcomes = getSchoolOutcomes(school);
+            // Use program-specific data instead of institution-level (undergrad) stats
+            var progEarnings = getProgramEarnings(matchingProgs);
+            var progDebt = getProgramDebt(matchingProgs);
             // Build a program-specific search URL (API doesn't provide program URLs)
             var firstProgTitle = matchingProgs.length > 0 ? (matchingProgs[0].title || analysis.cipLabel) : analysis.cipLabel;
             var progSearchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + firstProgTitle + ' admissions program');
+            var degreeBadge = analysis.degreeLevel ? getCredentialBadge(analysis.degreeLevel) : '';
 
             return '<div class="school-card" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
               '<button class="bookmark-btn ' + (apiSaved ? 'saved' : '') + '" onclick="event.stopPropagation(); toggleSaveApiSchool(\'' + cacheKey + '\'); this.classList.toggle(\'saved\'); this.innerHTML = this.classList.contains(\'saved\') ? \'&#9733; Saved\' : \'&#9733;\';" title="' + (apiSaved ? 'Remove from saved' : 'Save school') + '" aria-label="Save school">&#9733;</button>' +
               '<div class="school-card-name">' + name + '</div>' +
-              '<div style="color: var(--accent); font-weight: 600; font-size: 0.9rem; margin: 2px 0 6px;">' + progDisplay + '</div>' +
+              '<div style="color: var(--accent); font-weight: 600; font-size: 0.9rem; margin: 2px 0 6px;">' + progDisplay + ' ' + degreeBadge + '</div>' +
               '<div class="school-card-location">' + city + ', ' + state + '</div>' +
               '<div class="school-stats">' +
                 '<div class="school-stat"><div class="school-stat-label">Setting</div><div class="school-stat-value">' + setting + '</div></div>' +
-                '<div class="school-stat"><div class="school-stat-label">Tuition</div><div class="school-stat-value">' + tuitionStr + '</div></div>' +
+                '<div class="school-stat"><div class="school-stat-label">Tuition (Inst.)</div><div class="school-stat-value">' + tuitionStr + '</div></div>' +
                 '<div class="school-stat"><div class="school-stat-label">Est. Living Cost</div><div class="school-stat-value" style="color:#0369a1;">' + formatLivingCost(state) + '</div></div>' +
-                (outcomes.earnings ? '<div class="school-stat"><div class="school-stat-label">Avg Salary (10yr)</div><div class="school-stat-value" style="color:#059669;">' + outcomes.earnings + '</div></div>' : '') +
-                (outcomes.gradRate ? '<div class="school-stat"><div class="school-stat-label">Grad Rate</div><div class="school-stat-value">' + outcomes.gradRate + '</div></div>' : '') +
+                (progEarnings ? '<div class="school-stat"><div class="school-stat-label">' + progEarnings.label + '</div><div class="school-stat-value" style="color:#059669;">' + progEarnings.value + '</div></div>' : '') +
+                (progDebt ? '<div class="school-stat"><div class="school-stat-label">Median Grad Debt</div><div class="school-stat-value" style="color:#b45309;">' + progDebt.value + '</div></div>' : '') +
               '</div>' +
+              '<div style="font-size:0.65rem; color:var(--muted); margin-top:2px; padding: 0 2px;">Tuition is institutional (may differ for graduate programs)</div>' +
               buildRankingDisplay(name, analysis.cipLabel) +
               '<a href="' + progSearchUrl + '" target="_blank" onclick="event.stopPropagation();" class="school-card-link" style="cursor:pointer; color:var(--accent); text-decoration:none;">Find ' + firstProgTitle + ' program page &rarr;</a>' +
             '</div>';
