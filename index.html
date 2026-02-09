@@ -537,12 +537,14 @@
       pointer-events: none;
     }
 
-    .card:hover {
+    .card:hover, .card:focus-visible {
       border-color: var(--border-hover);
       transform: translateY(-6px);
       box-shadow: var(--shadow), var(--shadow-glow);
     }
-    .card:hover::after { opacity: 1; }
+    .card:hover::after, .card:focus-visible::after { opacity: 1; }
+    .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .card:focus { outline: none; }
 
     .card-school {
       font-size: 12px;
@@ -1154,11 +1156,13 @@
       padding: 28px;
       transition: all 0.35s var(--ease);
     }
-    .school-card:hover {
+    .school-card:hover, .school-card:focus-visible {
       border-color: var(--border-hover);
       transform: translateY(-4px);
       box-shadow: var(--shadow);
     }
+    .school-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .school-card:focus { outline: none; }
 
     .school-card-name {
       font-size: 20px;
@@ -1325,6 +1329,7 @@
             </select>
             <button type="submit" class="btn-search" onclick="handleSearch(event)">Search</button>
           </form>
+          <p class="search-hint" style="font-size:0.78rem; color:var(--text-tertiary); margin-top:10px; text-align:center;">Try &ldquo;computer science masters&rdquo;, &ldquo;MIT&rdquo;, or &ldquo;nursing PhD Texas&rdquo;. Use Search to check all 6,000+ US institutions.</p>
 
           <div class="stats-row reveal">
             <div class="stat">
@@ -1518,6 +1523,9 @@
         <div class="saved-actions">
           <button class="export-btn" onclick="exportSavedCSV()"><span class="icon">&#128196;</span> Download CSV</button>
           <button class="export-btn" onclick="exportSavedPDF()"><span class="icon">&#128462;</span> Print / Save PDF</button>
+          <button class="export-btn" onclick="exportDataAsJSON()"><span class="icon">&#128230;</span> Backup (JSON)</button>
+          <button class="export-btn" onclick="document.getElementById('import-json-input').click()"><span class="icon">&#128228;</span> Restore Backup</button>
+          <input type="file" id="import-json-input" accept=".json" style="display:none;" onchange="importDataFromJSON(this)">
           <button class="export-btn" onclick="clearAllSaved()" style="margin-left:auto; color:var(--danger); border-color:rgba(248,113,113,0.3);"><span class="icon">&#128465;</span> Clear all</button>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:20px;">
@@ -1739,8 +1747,19 @@
       } catch(e) {}
 
       populateStates();
-      loadPrograms();
       updateBadge();
+
+      // ── Deep linking: check hash BEFORE loading default page ──
+      // If URL has a hash like #saved or #about, go straight to that page
+      // instead of rendering the search grid first (which would flash and waste work).
+      var _initHash = window.location.hash.replace('#', '');
+      var _validPages = ['saved', 'about', 'disclaimer'];
+      if (_validPages.indexOf(_initHash) >= 0) {
+        showPage(_initHash, false); // showPage('saved') calls renderSavedPage() internally
+      } else {
+        loadPrograms(); // Only load the search grid if we're actually on the search page
+      }
+
       initScrollReveal();
 
       // Bind search events explicitly (backup for onsubmit/oninput attributes)
@@ -2051,7 +2070,8 @@
 
       if (pagePrograms.length === 0) {
         // Try live API search as fallback (only on explicit search, not while typing)
-        const query = document.getElementById('search-query').value.trim();
+        var queryInput = document.getElementById('search-query');
+        var query = queryInput ? queryInput.value.trim() : '';
         const selectedState = document.getElementById('filter-state').value;
         const selectedDegree = document.getElementById('filter-degree').value;
         if (_allowApiFallback && (query || selectedState) && getApiKey()) {
@@ -2093,10 +2113,29 @@
           }
           return;
         }
-        var emptyMsg = query ? 'No curated programs match "' + query + '". Click <strong>Search</strong> or press Enter to search 6,000+ US schools via live API.' : 'No programs found. Try adjusting your filters.';
+        // ── Search nudge: only show when query is present ──
+        if (query && !_allowApiFallback) {
+          // User is actively typing — nudge them to press Enter for live API search
+          grid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1">
+              <div class="empty-state-icon">\u{1F680}</div>
+              <p>Not finding <strong>"${query}"</strong> in our curated list? Press <strong>Enter</strong> to check all 6,000+ US schools via live API.</p>
+            </div>`;
+          document.getElementById('pagination').innerHTML = '';
+          return;
+        }
+        // Fallback empty states
+        var emptyMsg, emptyIcon;
+        if (query) {
+          emptyIcon = '&#128269;';
+          emptyMsg = 'No curated programs match <strong>"' + query.replace(/</g, '&lt;') + '"</strong>. Click <strong>Search</strong> or press Enter to search 6,000+ US schools via live API.';
+        } else {
+          emptyIcon = '&#128269;';
+          emptyMsg = 'No programs found. Try adjusting your filters.';
+        }
         grid.innerHTML = `
           <div class="empty-state" style="grid-column: 1 / -1">
-            <div class="empty-state-icon">&#128269;</div>
+            <div class="empty-state-icon">${emptyIcon}</div>
             <p>${emptyMsg}</p>
           </div>`;
         document.getElementById('pagination').innerHTML = '';
@@ -2108,7 +2147,7 @@
         const tuition = prog.tuitionInState ? `$${(prog.tuitionInState / 1000).toFixed(0)}K` : 'N/A';
         const saved = isSaved(prog.id);
         return `
-          <div class="card" onclick="openModal(${prog.id})" style="position:relative;">
+          <div class="card" tabindex="0" role="button" aria-label="${prog.name} at ${school.name}" onclick="openModal(${prog.id})" style="position:relative;">
             <button class="bookmark-btn ${saved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSave(${prog.id});" title="${saved ? 'Remove from saved' : 'Save program'}" aria-label="Save program">&#9733;</button>
             <div class="card-school">${school.name}</div>
             <div class="card-program">${prog.name}</div>
@@ -2359,15 +2398,17 @@
             return false;
           });
         }
-        // Step 2: Further narrow by keyword matching on titles
+        // Step 2: Sort keyword-matched titles to top (consistent with search page sort-not-filter approach)
         var _modalKw = (_lastSearchTerms || _lastSearchProgramLabel || '').toLowerCase();
         var _modalKwWords = _modalKw.split(/\s+/).filter(function(w) { return w.length >= 3; });
         if (_modalKwWords.length > 0 && _matchedCipProgs.length > 0) {
-          var _kwNarrowed = _matchedCipProgs.filter(function(p) {
-            var t = (p.title || '').toLowerCase();
-            return _modalKwWords.some(function(w) { return t.indexOf(w) >= 0; });
+          _matchedCipProgs.sort(function(a, b) {
+            var tA = (a.title || '').toLowerCase();
+            var tB = (b.title || '').toLowerCase();
+            var mA = _modalKwWords.some(function(w) { return tA.indexOf(w) >= 0; }) ? 1 : 0;
+            var mB = _modalKwWords.some(function(w) { return tB.indexOf(w) >= 0; }) ? 1 : 0;
+            return mB - mA;
           });
-          if (_kwNarrowed.length > 0) _matchedCipProgs = _kwNarrowed;
         }
       }
       var _modalProgEarnings = getProgramEarnings(_matchedCipProgs);
@@ -2810,7 +2851,7 @@
       }
     };
 
-    function showPage(pageName) {
+    function showPage(pageName, pushState) {
       document.querySelectorAll('.page-section').forEach(el => el.classList.remove('active'));
       document.getElementById(pageName + '-page').classList.add('active');
       document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
@@ -2821,7 +2862,25 @@
       if (pageName === 'search') loadPrograms();
       if (pageName === 'saved') renderSavedPage();
       window.scrollTo(0, 0);
+      // Deep linking: update URL hash so pages are bookmarkable and back-button works
+      if (pushState !== false) {
+        var newHash = pageName === 'search' ? '' : '#' + pageName;
+        if (window.location.hash !== newHash && !(pageName === 'search' && !window.location.hash)) {
+          history.pushState({ page: pageName }, '', newHash || window.location.pathname);
+        }
+      }
     }
+
+    // Handle browser back/forward buttons
+    window.addEventListener('popstate', function(e) {
+      var page = (e.state && e.state.page) ? e.state.page : (window.location.hash.replace('#', '') || 'search');
+      var validPages = ['search', 'saved', 'about', 'disclaimer'];
+      if (validPages.indexOf(page) >= 0) {
+        showPage(page, false); // false prevents infinite history loops
+      }
+    });
+
+    // Hash-based page restore is handled inside DOMContentLoaded (see above)
 
     // Close modal on backdrop click
     window.onclick = function(e) {
@@ -2944,6 +3003,8 @@
       try { localStorage.setItem('ak-saved-api-schools', JSON.stringify(schools)); } catch(e) {}
     }
     function getApiSchoolKey(school) {
+      // Use Scorecard UNITID if available (most reliable), fallback to name|state
+      if (school.id) return 'uid:' + school.id;
       return (school['school.name'] || '') + '|' + (school['school.state'] || '');
     }
     function isApiSchoolSaved(school) {
@@ -2962,8 +3023,9 @@
       if (idx > -1) {
         saved.splice(idx, 1);
       } else {
-        // Store a slim copy (only the fields we need)
+        // Store a slim copy (only the fields we need, including Scorecard UNITID for dedup)
         saved.push({
+          'id': school['id'] || school.id,
           'school.name': school['school.name'],
           'school.city': school['school.city'],
           'school.state': school['school.state'],
@@ -2996,16 +3058,50 @@
       }
     }
 
+    // ── Shared helper: build a dedup index of curated schools ──
+    // Returns { ids: {scorecardId: true, ...}, names: {"school name": true, ...} }
+    // Used by updateBadge() and renderSavedPage() to avoid showing duplicates.
+    // Primary match: Scorecard ID (exact). Fallback: school name (for older saved data).
+    function _getCuratedSchoolIndex() {
+      var index = { ids: {}, names: {} };
+      var savedIds = getSavedPrograms();
+      savedIds.forEach(function(id) {
+        var prog = DATABASE.programs.find(function(p) { return p.id === id; });
+        if (prog) {
+          var school = DATABASE.schools.find(function(s) { return s.id === prog.schoolId; });
+          if (school) {
+            if (school.scorecardId) index.ids[school.scorecardId] = true;
+            index.names[(school.name || '').toLowerCase().trim()] = true;
+          }
+        }
+      });
+      return index;
+    }
+
+    // Check if an API school duplicates a curated saved entry (by Scorecard ID or name)
+    function _isApiSchoolDuplicate(apiSchool, curatedIndex) {
+      // Primary: match by Scorecard UNITID (the 'id' field from API)
+      var apiId = apiSchool.id || apiSchool['id'];
+      if (apiId && curatedIndex.ids[apiId]) return true;
+      // Fallback: match by name (for older saved data without 'id')
+      var apiName = (apiSchool['school.name'] || '').toLowerCase().trim();
+      return !!curatedIndex.names[apiName];
+    }
+
     function updateBadge() {
-      const saved = getSavedPrograms();
-      const savedApi = getSavedApiSchools();
-      const total = saved.length + savedApi.length;
-      const badge = document.getElementById('save-badge');
+      var savedIds = getSavedPrograms();
+      var savedApi = getSavedApiSchools();
+      var curatedIndex = _getCuratedSchoolIndex();
+
+      // Deduplicate API schools that are already saved as curated programs
+      var uniqueApiCount = savedApi.filter(s => !_isApiSchoolDuplicate(s, curatedIndex)).length;
+      var total = savedIds.length + uniqueApiCount;
+
+      var badge = document.getElementById('save-badge');
       if (total > 0) {
         badge.textContent = '(' + total + ')';
         badge.style.display = 'inline';
       } else {
-        badge.textContent = '';
         badge.style.display = 'none';
       }
     }
@@ -3089,13 +3185,22 @@
       var savedSortMode = savedSortEl ? savedSortEl.value : 'name';
       savedApi = sortSavedApiSchools(savedApi, savedSortMode);
 
-      // Show count
-      var savedCountEl = document.getElementById('saved-count');
-      var totalSaved = saved.length + savedApi.length;
-      if (savedCountEl) savedCountEl.textContent = totalSaved + ' program' + (totalSaved !== 1 ? 's' : '') + ' saved';
-
       const grid = document.getElementById('saved-cards-grid');
       const savedPrograms = DATABASE.programs.filter(p => saved.includes(p.id));
+
+      // ── Deduplication (render-only, non-destructive) ──
+      // Hide API schools from display if they match a curated school (by Scorecard ID or name),
+      // but do NOT delete them from localStorage — if the user later removes the
+      // curated program, the API-saved school should reappear automatically.
+      var curatedIndex = _getCuratedSchoolIndex();
+      var displayApi = savedApi.filter(function(school) {
+        return !_isApiSchoolDuplicate(school, curatedIndex);
+      });
+
+      // Show unified count (curated programs + non-duplicate API schools)
+      var savedCountEl = document.getElementById('saved-count');
+      var totalSaved = savedPrograms.length + displayApi.length;
+      if (savedCountEl) savedCountEl.textContent = totalSaved + ' program' + (totalSaved !== 1 ? 's' : '') + ' saved';
 
       // Application tracking summary
       var tracker = getAppTracker();
@@ -3122,7 +3227,7 @@
         const school = DATABASE.schools.find(s => s.id === prog.schoolId);
         const tuition = prog.tuitionInState ? '$' + (prog.tuitionInState / 1000).toFixed(0) + 'K' : 'N/A';
         var trackKey = getTrackingKey('curated', prog.id);
-        return '<div class="card" onclick="openModal(' + prog.id + ')" style="position:relative;">' +
+        return '<div class="card" tabindex="0" role="button" aria-label="' + prog.name + ' at ' + school.name + '" onclick="openModal(' + prog.id + ')" style="position:relative;">' +
           '<button class="bookmark-btn saved" onclick="event.stopPropagation(); toggleSave(' + prog.id + ');" title="Remove from saved" aria-label="Remove program">&#9733;</button>' +
           '<div class="card-school">' + school.name + '</div>' +
           '<div class="card-program">' + prog.name + '</div>' +
@@ -3137,13 +3242,13 @@
         '</div>';
       }).join('');
 
-      // Saved API school cards
-      if (savedApi.length > 0) {
+      // Saved API school cards (duplicates of curated schools hidden from display)
+      if (displayApi.length > 0) {
         if (savedPrograms.length > 0) {
           cardsHtml += '<div style="grid-column: 1 / -1; margin: 12px 0 4px; border-top: 1px solid var(--border); padding-top: 12px;">' +
             '<div style="display: inline-block; background: var(--accent); color: #fff; padding: 4px 12px; border-radius: 16px; font-size: 0.75rem; font-weight: 600;">Saved from Live Search</div></div>';
         }
-        cardsHtml += savedApi.map(function(school, idx) {
+        cardsHtml += displayApi.map(function(school, idx) {
           // Cache so modal can access
           var cacheKey = 'saved_' + idx;
           _apiResultsCache[cacheKey] = school;
@@ -3166,7 +3271,7 @@
           }
 
           var apiTrackKey = getTrackingKey('api', getApiSchoolKey(school));
-          return '<div class="school-card" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
+          return '<div class="school-card" tabindex="0" role="button" aria-label="' + name + '" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
             '<button class="bookmark-btn saved" onclick="event.stopPropagation(); toggleSaveApiSchool(\'' + cacheKey + '\'); renderSavedPage();" title="Remove from saved" aria-label="Remove school">&#9733;</button>' +
             '<div class="school-card-name">' + name + '</div>' +
             '<div class="school-card-location">' + city + ', ' + state + '</div>' +
@@ -3570,11 +3675,17 @@
     // ─── College Scorecard API ───────────────────────────────────
     const API_BASE = 'https://api.data.gov/ed/collegescorecard/v1/schools';
 
-    // Embedded API key — no visitor setup needed
-    const EMBEDDED_API_KEY = 'nXZPowS4BflHrarIqkai6nZwsp2alozNBeTCKEIX';
+    // Embedded API key — obfuscated to deter casual scraping from source view
+    // To rotate: base64-encode the reversed key and replace _AK_ENC below
+    var _AK_ENC = 'WElFS0NUZUJOem9sYTJwc3dabjZpYWtxSXJhckhsZkI0U3dvUFpYbg==';
+    function _decodeKey(enc) {
+      try { return atob(enc).split('').reverse().join(''); } catch(e) { return ''; }
+    }
+    var _resolvedKey = null;
 
     function getApiKey() {
-      return EMBEDDED_API_KEY;
+      if (!_resolvedKey) _resolvedKey = _decodeKey(_AK_ENC);
+      return _resolvedKey;
     }
 
     // Convert College Scorecard locale code to human-readable setting
@@ -4030,7 +4141,7 @@
 
       try {
         const fields = [
-          'school.name', 'school.city', 'school.state',
+          'id', 'school.name', 'school.city', 'school.state',
           'school.school_url', 'school.ownership',
           'school.locale',
           'latest.cost.tuition.in_state',
@@ -4101,7 +4212,7 @@
           }
 
           return `
-            <div class="school-card" onclick="openApiModal('${cacheKey}')" style="cursor:pointer;">
+            <div class="school-card" tabindex="0" role="button" aria-label="${name}" onclick="openApiModal('${cacheKey}')" style="cursor:pointer;">
               <div class="school-card-name">${name}</div>
               <div class="school-card-location">${city}, ${state}</div>
               <div class="school-stats">
@@ -5090,7 +5201,7 @@
 
       try {
         const fields = [
-          'school.name', 'school.city', 'school.state',
+          'id', 'school.name', 'school.city', 'school.state',
           'school.school_url', 'school.ownership',
           'school.locale',
           'latest.cost.tuition.in_state',
@@ -5172,7 +5283,7 @@
               progLinkLabel = 'Find graduate admissions page';
               progLinkUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' graduate admissions programs');
             }
-            return '<div class="school-card" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
+            return '<div class="school-card" tabindex="0" role="button" aria-label="' + name + '" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
               '<button class="bookmark-btn ' + (apiSaved ? 'saved' : '') + '" onclick="event.stopPropagation(); toggleSaveApiSchool(\'' + cacheKey + '\'); this.classList.toggle(\'saved\'); this.innerHTML = this.classList.contains(\'saved\') ? \'&#9733; Saved\' : \'&#9733;\';" title="' + (apiSaved ? 'Remove from saved' : 'Save school') + '" aria-label="Save school">&#9733;</button>' +
               '<div class="school-card-name">' + name + '</div>' +
               '<div class="school-card-location">' + city + ', ' + state + '</div>' +
@@ -5206,7 +5317,7 @@
 
       try {
         const fields = [
-          'school.name', 'school.city', 'school.state',
+          'id', 'school.name', 'school.city', 'school.state',
           'school.school_url', 'school.ownership',
           'school.locale',
           'latest.cost.tuition.in_state',
@@ -5248,53 +5359,29 @@
         var results = data.results || [];
 
         // ── KEY QUALITY FILTER: Remove schools that don't actually have a matching program ──
-        // The API filter is inclusive: CIP code + credential level are applied separately,
-        // so a school may appear if it has CIP 0901 at bachelor's level AND any master's program.
-        // We verify each school has a program matching BOTH the CIP code AND degree level.
-        results = results.filter(function(school) {
+        // ── CIP + DEGREE LEVEL FILTER: Keep only schools with a matching program ──
+        // The API filter is inclusive (CIP + credential applied separately), so we
+        // verify each school has a program matching BOTH the CIP code AND degree level.
+        results = data.results.filter(function(school) {
           var progs = school['latest.programs.cip_4_digit'] || [];
-          var hasMatch = progs.some(function(p) {
-            var codeOk = false;
-            for (var ci = 0; ci < analysis.cipCodes.length; ci++) {
-              if (p.code === analysis.cipCodes[ci]) { codeOk = true; break; }
-            }
-            if (!codeOk) return false;
-            if (analysis.degreeLevel && p.credential && p.credential.level !== analysis.degreeLevel) return false;
-            return true;
+          return progs.some(function(p) {
+            var codeOk = analysis.cipCodes.some(c => p.code === c);
+            var levelOk = !analysis.degreeLevel || (p.credential && p.credential.level === analysis.degreeLevel);
+            return codeOk && levelOk;
           });
-          return hasMatch;
         });
 
-        // ── KEYWORD RELEVANCE FILTER: Verify program titles relate to search query ──
-        // Uses the user's actual search terms (not the CIP label) so "communication" doesn't
-        // match "Comparative Media Studies" just because the CIP label includes "Studies".
-        // When searchTerms is available: strict filter (user typed these specific words).
-        // When only cipLabel available: soft fallback (don't eliminate all results).
-        var kwSource = analysis.searchTerms || analysis.cipLabel || '';
-        if (kwSource) {
-          var searchWords = kwSource.toLowerCase().split(/\s+/).filter(function(w) { return w.length >= 3; });
-          if (searchWords.length > 0) {
-            var kwFiltered = results.filter(function(school) {
-              var progs = school['latest.programs.cip_4_digit'] || [];
-              var hasRelevantTitle = progs.some(function(p) {
-                var codeOk = false;
-                for (var ci = 0; ci < analysis.cipCodes.length; ci++) {
-                  if (p.code === analysis.cipCodes[ci]) { codeOk = true; break; }
-                }
-                if (!codeOk) return false;
-                if (analysis.degreeLevel && p.credential && p.credential.level !== analysis.degreeLevel) return false;
-                var title = (p.title || '').toLowerCase();
-                return searchWords.some(function(w) { return title.indexOf(w) >= 0; });
-              });
-              return hasRelevantTitle;
-            });
-            // Strict when using user's searchTerms; soft fallback when using cipLabel only
-            if (analysis.searchTerms) {
-              results = kwFiltered; // strict: user explicitly searched these words
-            } else if (kwFiltered.length > 0) {
-              results = kwFiltered; // soft: only apply if it doesn't eliminate everything
-            }
-          }
+        // ── KEYWORD RELEVANCE SORT: Move exact keyword matches to the top ──
+        // Instead of filtering OUT schools that lack a keyword match (which hid valid
+        // CIP matches like "Media Studies" for a "Communication" search), we keep ALL
+        // CIP+level matches and use scoring to sort keyword-matched schools to the top.
+        if (analysis.searchTerms) {
+          var kw = analysis.searchTerms.toLowerCase();
+          results.forEach(s => {
+            var titles = (s['latest.programs.cip_4_digit'] || []).map(p => (p.title || '').toLowerCase());
+            s._relevance = titles.some(t => t.includes(kw)) ? 2 : 1;
+          });
+          results.sort((a, b) => (b._relevance || 0) - (a._relevance || 0));
         }
 
         if (analysis.schoolName) {
@@ -5362,17 +5449,18 @@
               if (analysis.degreeLevel && p.credential && p.credential.level !== analysis.degreeLevel) return false;
               return true;
             });
-            // Further narrow to programs whose titles match the user's search keywords
-            // This prevents showing "Journalism, Public Relations, Digital Media" when user searched "communication"
+            // Sort programs so keyword-matched titles appear first on the card,
+            // but keep related CIP programs visible below (e.g., "Media Studies" stays for "communication")
             var _kwSrc = (analysis.searchTerms || analysis.cipLabel || '').toLowerCase();
             var _kwWords = _kwSrc.split(/\s+/).filter(function(w) { return w.length >= 3; });
             if (_kwWords.length > 0) {
-              var kwMatchedProgs = matchingProgs.filter(function(p) {
-                var t = (p.title || '').toLowerCase();
-                return _kwWords.some(function(w) { return t.indexOf(w) >= 0; });
+              matchingProgs.sort(function(a, b) {
+                var tA = (a.title || '').toLowerCase();
+                var tB = (b.title || '').toLowerCase();
+                var matchA = _kwWords.some(function(w) { return tA.indexOf(w) >= 0; }) ? 1 : 0;
+                var matchB = _kwWords.some(function(w) { return tB.indexOf(w) >= 0; }) ? 1 : 0;
+                return matchB - matchA;
               });
-              // Use keyword-matched if any found; otherwise fall back to all CIP-matched
-              if (kwMatchedProgs.length > 0) matchingProgs = kwMatchedProgs;
             }
             var progNames = matchingProgs.map(function(p) {
               var credLabel = p.credential ? p.credential.title || '' : '';
@@ -5389,7 +5477,7 @@
             var progSearchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(name + ' ' + firstProgTitle + ' admissions program');
             var degreeBadge = analysis.degreeLevel ? getCredentialBadge(analysis.degreeLevel) : '';
 
-            return '<div class="school-card" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
+            return '<div class="school-card" tabindex="0" role="button" aria-label="' + name + ' — ' + progDisplay + '" onclick="openApiModal(\'' + cacheKey + '\')" style="cursor:pointer; position:relative;">' +
               '<button class="bookmark-btn ' + (apiSaved ? 'saved' : '') + '" onclick="event.stopPropagation(); toggleSaveApiSchool(\'' + cacheKey + '\'); this.classList.toggle(\'saved\'); this.innerHTML = this.classList.contains(\'saved\') ? \'&#9733; Saved\' : \'&#9733;\';" title="' + (apiSaved ? 'Remove from saved' : 'Save school') + '" aria-label="Save school">&#9733;</button>' +
               '<div class="school-card-name">' + name + '</div>' +
               '<div style="color: var(--accent); font-weight: 600; font-size: 0.9rem; margin: 2px 0 6px;">' + progDisplay + ' ' + degreeBadge + '</div>' +
@@ -5415,6 +5503,101 @@
           '</div>';
       }
     }
+
+    // ─── Data Portability: JSON Backup / Restore ─────────────────
+    function exportDataAsJSON() {
+      var backup = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        source: 'AdmitKit',
+        data: {}
+      };
+      var keys = ['ak-saved-programs', 'ak-saved-api-schools', 'ak-app-tracker'];
+      keys.forEach(function(key) {
+        try {
+          var raw = localStorage.getItem(key);
+          if (raw) backup.data[key] = JSON.parse(raw);
+        } catch(e) { /* skip corrupted keys */ }
+      });
+      var blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'admitkit-backup-' + new Date().toISOString().slice(0,10) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function importDataFromJSON(input) {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          var backup = JSON.parse(e.target.result);
+          if (!backup || !backup.data || backup.source !== 'AdmitKit') {
+            alert('Invalid backup file. Please select a valid AdmitKit JSON backup.');
+            input.value = '';
+            return;
+          }
+          var imported = 0;
+          var keys = ['ak-saved-programs', 'ak-saved-api-schools', 'ak-app-tracker'];
+          keys.forEach(function(key) {
+            if (backup.data[key]) {
+              // Merge with existing data instead of overwriting
+              try {
+                var existing = JSON.parse(localStorage.getItem(key) || '{}');
+                var incoming = backup.data[key];
+                if (Array.isArray(incoming)) {
+                  // For arrays (saved-programs): merge unique values
+                  var existingArr = Array.isArray(existing) ? existing : [];
+                  incoming.forEach(function(item) {
+                    if (existingArr.indexOf(item) === -1) existingArr.push(item);
+                  });
+                  localStorage.setItem(key, JSON.stringify(existingArr));
+                } else if (typeof incoming === 'object') {
+                  // For objects (api-schools, tracker): merge keys
+                  if (typeof existing !== 'object' || Array.isArray(existing)) existing = {};
+                  Object.keys(incoming).forEach(function(k) {
+                    if (!existing[k]) existing[k] = incoming[k];
+                  });
+                  localStorage.setItem(key, JSON.stringify(existing));
+                }
+                imported++;
+              } catch(mergeErr) {
+                localStorage.setItem(key, JSON.stringify(backup.data[key]));
+                imported++;
+              }
+            }
+          });
+          input.value = '';
+          if (imported > 0) {
+            alert('Backup restored successfully! Merged ' + imported + ' data category' + (imported > 1 ? 'ies' : 'y') + '.');
+            renderSavedPage();
+            updateSaveBadge();
+          } else {
+            alert('Backup file was empty — nothing to restore.');
+          }
+        } catch(parseErr) {
+          alert('Could not read the backup file. Please ensure it is a valid JSON file.');
+          input.value = '';
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // ─── Keyboard Accessibility for Cards ─────────────────────────
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        var el = document.activeElement;
+        if (el && (el.classList.contains('school-card') || el.classList.contains('card'))) {
+          e.preventDefault();
+          el.click();
+        }
+      }
+    });
   </script>
 </body>
 </html>
