@@ -5358,11 +5358,10 @@
 
         var results = data.results || [];
 
-        // ── KEY QUALITY FILTER: Remove schools that don't actually have a matching program ──
         // ── CIP + DEGREE LEVEL FILTER: Keep only schools with a matching program ──
         // The API filter is inclusive (CIP + credential applied separately), so we
         // verify each school has a program matching BOTH the CIP code AND degree level.
-        results = data.results.filter(function(school) {
+        results = results.filter(function(school) {
           var progs = school['latest.programs.cip_4_digit'] || [];
           return progs.some(function(p) {
             var codeOk = analysis.cipCodes.some(c => p.code === c);
@@ -5375,13 +5374,20 @@
         // Instead of filtering OUT schools that lack a keyword match (which hid valid
         // CIP matches like "Media Studies" for a "Communication" search), we keep ALL
         // CIP+level matches and use scoring to sort keyword-matched schools to the top.
+        // NOTE: Only score against CIP-matched programs (not all programs at the school)
         if (analysis.searchTerms) {
           var kw = analysis.searchTerms.toLowerCase();
-          results.forEach(s => {
-            var titles = (s['latest.programs.cip_4_digit'] || []).map(p => (p.title || '').toLowerCase());
-            s._relevance = titles.some(t => t.includes(kw)) ? 2 : 1;
+          results.forEach(function(s) {
+            var progs = s['latest.programs.cip_4_digit'] || [];
+            // Only check titles of programs that match the searched CIP codes
+            var matchedTitles = progs.filter(function(p) {
+              return analysis.cipCodes.some(function(c) { return p.code === c; });
+            }).map(function(p) { return (p.title || '').toLowerCase(); });
+            s._relevance = matchedTitles.some(function(t) { return t.indexOf(kw) >= 0; }) ? 2 : 1;
           });
-          results.sort((a, b) => (b._relevance || 0) - (a._relevance || 0));
+          results.sort(function(a, b) { return (b._relevance || 0) - (a._relevance || 0); });
+          // Clean up temporary property so it doesn't leak into the results cache
+          results.forEach(function(s) { delete s._relevance; });
         }
 
         if (analysis.schoolName) {
