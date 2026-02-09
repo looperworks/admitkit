@@ -2083,6 +2083,7 @@
           // Save search context for modal use
           _lastSearchQuery = query;
           _lastSearchProgramLabel = (queryAnalysis.type === 'program' || queryAnalysis.type === 'mixed') ? (queryAnalysis.cipLabel || '') : '';
+          _lastSearchTerms = (queryAnalysis.type === 'program' || queryAnalysis.type === 'mixed') ? (queryAnalysis.searchTerms || queryAnalysis.cipLabel || '') : '';
 
           // Route to program CIP search or school name search
           if (queryAnalysis.type === 'program' || queryAnalysis.type === 'mixed') {
@@ -2292,6 +2293,7 @@
     var _apiResultsCache = {};
     var _lastSearchQuery = ''; // Track search query for modal context
     var _lastSearchProgramLabel = ''; // e.g. "Architecture", "Computer Science"
+    var _lastSearchTerms = ''; // User's actual search words after stripping degree words, e.g. "communication"
 
     function openApiModal(cacheKey) {
       var school = _apiResultsCache[cacheKey];
@@ -2343,25 +2345,29 @@
       }
 
       // Identify program-specific data from matched CIP programs
+      // Uses keyword matching (not phrase matching) for accurate results
       var _isProgSearch = !!_lastSearchProgramLabel;
       var _matchedCipProgs = [];
-      if (_isProgSearch) {
-        var _sl = _lastSearchProgramLabel.toLowerCase();
-        _matchedCipProgs = programs.filter(function(p) {
-          var t = (p.title || '').toLowerCase();
-          return t.indexOf(_sl) >= 0 || _sl.indexOf(t) >= 0;
-        });
-        // Also match by CIP code if available from last search context
-        if (_matchedCipProgs.length === 0 && _lastSearchContext && _lastSearchContext.args) {
-          var _a = _lastSearchContext.args[0];
-          if (_a && _a.cipCodes) {
-            _matchedCipProgs = programs.filter(function(p) {
-              for (var ci = 0; ci < _a.cipCodes.length; ci++) {
-                if (p.code === _a.cipCodes[ci] && p.credential && (p.credential.level === 5 || p.credential.level === 6)) return true;
-              }
-              return false;
-            });
-          }
+      if (_isProgSearch && _lastSearchContext && _lastSearchContext.args) {
+        var _a = _lastSearchContext.args[0];
+        // Step 1: Filter by CIP code + grad level
+        if (_a && _a.cipCodes) {
+          _matchedCipProgs = programs.filter(function(p) {
+            for (var ci = 0; ci < _a.cipCodes.length; ci++) {
+              if (p.code === _a.cipCodes[ci] && p.credential && (p.credential.level === 5 || p.credential.level === 6)) return true;
+            }
+            return false;
+          });
+        }
+        // Step 2: Further narrow by keyword matching on titles
+        var _modalKw = (_lastSearchTerms || _lastSearchProgramLabel || '').toLowerCase();
+        var _modalKwWords = _modalKw.split(/\s+/).filter(function(w) { return w.length >= 3; });
+        if (_modalKwWords.length > 0 && _matchedCipProgs.length > 0) {
+          var _kwNarrowed = _matchedCipProgs.filter(function(p) {
+            var t = (p.title || '').toLowerCase();
+            return _modalKwWords.some(function(w) { return t.indexOf(w) >= 0; });
+          });
+          if (_kwNarrowed.length > 0) _matchedCipProgs = _kwNarrowed;
         }
       }
       var _modalProgEarnings = getProgramEarnings(_matchedCipProgs);
@@ -2505,12 +2511,13 @@
         '</div>';
       }
 
-      // Determine which programs match the user's search
-      var searchLabel = (_lastSearchProgramLabel || '').toLowerCase();
+      // Determine which programs match the user's search (keyword-based)
+      var _modalSearchKw = (_lastSearchTerms || _lastSearchProgramLabel || '').toLowerCase();
+      var _modalSearchWords = _modalSearchKw.split(/\s+/).filter(function(w) { return w.length >= 3; });
       function isSearchMatch(prog) {
-        if (!searchLabel) return false;
+        if (_modalSearchWords.length === 0) return false;
         var title = (prog.title || '').toLowerCase();
-        return title.indexOf(searchLabel) >= 0 || searchLabel.indexOf(title) >= 0;
+        return _modalSearchWords.some(function(w) { return title.indexOf(w) >= 0; });
       }
 
       // Split programs into matched vs other
@@ -5372,6 +5379,18 @@
               if (analysis.degreeLevel && p.credential && p.credential.level !== analysis.degreeLevel) return false;
               return true;
             });
+            // Further narrow to programs whose titles match the user's search keywords
+            // This prevents showing "Journalism, Public Relations, Digital Media" when user searched "communication"
+            var _kwSrc = (analysis.searchTerms || analysis.cipLabel || '').toLowerCase();
+            var _kwWords = _kwSrc.split(/\s+/).filter(function(w) { return w.length >= 3; });
+            if (_kwWords.length > 0) {
+              var kwMatchedProgs = matchingProgs.filter(function(p) {
+                var t = (p.title || '').toLowerCase();
+                return _kwWords.some(function(w) { return t.indexOf(w) >= 0; });
+              });
+              // Use keyword-matched if any found; otherwise fall back to all CIP-matched
+              if (kwMatchedProgs.length > 0) matchingProgs = kwMatchedProgs;
+            }
             var progNames = matchingProgs.map(function(p) {
               var credLabel = p.credential ? p.credential.title || '' : '';
               return p.title + (credLabel ? ' (' + credLabel + ')' : '');
