@@ -1925,17 +1925,12 @@
       // Also check CIP-based program matching for better relevance
       // But skip CIP matching if query is a known school alias (e.g., "MIT" should not match "IT")
       var isSchoolAlias = query && (SCHOOL_ALIASES[query] || expandedQuery !== query);
-      var cipMatch = (!isSchoolAlias && query) ? (PROGRAM_CIP_MAP[query] || null) : null;
-      if (!cipMatch && query && !isSchoolAlias) {
-        // Try word-boundary match against CIP map keys (longest first)
-        var _cipKeys = Object.keys(PROGRAM_CIP_MAP).sort(function(a,b){ return b.length - a.length; });
-        for (var _ci = 0; _ci < _cipKeys.length; _ci++) {
-          var _ck = _cipKeys[_ci];
-          // Only match if the CIP key appears as a whole word/phrase, not a substring of another word
-          if (_ck.length >= 3 && query === _ck) {
-            cipMatch = PROGRAM_CIP_MAP[_ck];
-            break;
-          }
+      var cipMatch = null;
+      if (!isSchoolAlias && query) {
+        // Use findProgramCIP which handles degree-word stripping, multi-word queries, and substring matching
+        var cipResult = findProgramCIP(query);
+        if (cipResult) {
+          cipMatch = { cip: cipResult.cipCodes, label: cipResult.label };
         }
       }
 
@@ -1966,7 +1961,9 @@
 
         const matchState = !state || school.state === state;
         const matchDegree = !degree || prog.degreeType === degree;
-        return matchQuery && matchState && matchDegree;
+        return matchQuery && matchState && matchDegree &&
+               stateMatchesRegionFilter(school.state) &&
+               schoolMatchesRankingFilter(school.name);
       });
       currentPage = 1;
       renderCards();
