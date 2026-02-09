@@ -5255,6 +5255,50 @@
         const data = await res.json();
 
         var results = data.results || [];
+
+        // ── KEY QUALITY FILTER: Remove schools that don't actually have a matching program ──
+        // The API filter is inclusive: CIP code + credential level are applied separately,
+        // so a school may appear if it has CIP 0901 at bachelor's level AND any master's program.
+        // We verify each school has a program matching BOTH the CIP code AND degree level.
+        results = results.filter(function(school) {
+          var progs = school['latest.programs.cip_4_digit'] || [];
+          var hasMatch = progs.some(function(p) {
+            var codeOk = false;
+            for (var ci = 0; ci < analysis.cipCodes.length; ci++) {
+              if (p.code === analysis.cipCodes[ci]) { codeOk = true; break; }
+            }
+            if (!codeOk) return false;
+            if (analysis.degreeLevel && p.credential && p.credential.level !== analysis.degreeLevel) return false;
+            return true;
+          });
+          return hasMatch;
+        });
+
+        // ── KEYWORD RELEVANCE FILTER: Verify program titles relate to search query ──
+        // Prevents false positives from CIP code mismatches in the Scorecard data.
+        // Uses a soft approach: if keyword filter removes ALL results, fall back to quality-only results.
+        if (analysis.cipLabel) {
+          var searchWords = analysis.cipLabel.toLowerCase().split(/\s+/).filter(function(w) { return w.length >= 3; });
+          if (searchWords.length > 0) {
+            var kwFiltered = results.filter(function(school) {
+              var progs = school['latest.programs.cip_4_digit'] || [];
+              var hasRelevantTitle = progs.some(function(p) {
+                var codeOk = false;
+                for (var ci = 0; ci < analysis.cipCodes.length; ci++) {
+                  if (p.code === analysis.cipCodes[ci]) { codeOk = true; break; }
+                }
+                if (!codeOk) return false;
+                if (analysis.degreeLevel && p.credential && p.credential.level !== analysis.degreeLevel) return false;
+                var title = (p.title || '').toLowerCase();
+                return searchWords.some(function(w) { return title.indexOf(w) >= 0; });
+              });
+              return hasRelevantTitle;
+            });
+            // Only apply if it doesn't eliminate everything
+            if (kwFiltered.length > 0) results = kwFiltered;
+          }
+        }
+
         if (analysis.schoolName) {
           results = sortByRelevance(results, analysis.schoolName);
         }
@@ -5273,7 +5317,7 @@
           results = results.filter(function(s) { return schoolMatchesRankingFilter(s['school.name'] || ''); });
         }
 
-        var total = (_activeRegionFilter || _activeRankingFilter) ? results.length : (data.metadata ? data.metadata.total : results.length);
+        var total = results.length;
 
         if (results.length === 0) {
           var searchDesc = analysis.cipLabel || 'this program';
