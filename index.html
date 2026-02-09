@@ -4851,7 +4851,8 @@
           cipCodes: programResult.cipCodes,
           cipLabel: programResult.label,
           degreeLevel: programResult.degreeLevel,
-          schoolName: schoolName
+          schoolName: schoolName,
+          searchTerms: programResult.searchTerms || programResult.label
         };
       }
 
@@ -4871,7 +4872,7 @@
         // Infer degree level from well-known abbreviations
         if (/^(mba|mpa|mph|msw|mfa|mlis|meng|mpp)$/.test(text)) degreeLevel = 5;
         if (/^(jd)$/.test(text)) degreeLevel = 7;
-        return { cipCodes: m.cip, label: m.label, degreeLevel: degreeLevel };
+        return { cipCodes: m.cip, label: m.label, degreeLevel: degreeLevel, searchTerms: text };
       }
 
       // 2. Strip degree words and try again
@@ -4898,7 +4899,7 @@
 
       // Direct match after cleaning
       if (cleaned && PROGRAM_CIP_MAP[cleaned]) {
-        return { cipCodes: PROGRAM_CIP_MAP[cleaned].cip, label: PROGRAM_CIP_MAP[cleaned].label, degreeLevel: degreeLevel };
+        return { cipCodes: PROGRAM_CIP_MAP[cleaned].cip, label: PROGRAM_CIP_MAP[cleaned].label, degreeLevel: degreeLevel, searchTerms: cleaned };
       }
 
       // 3. Substring match — check if any CIP map key is contained in the cleaned text (longest first)
@@ -4907,7 +4908,7 @@
         for (var c = 0; c < cipKeys.length; c++) {
           var ck = cipKeys[c];
           if (ck.length >= 2 && cleaned.indexOf(ck) >= 0) {
-            return { cipCodes: PROGRAM_CIP_MAP[ck].cip, label: PROGRAM_CIP_MAP[ck].label, degreeLevel: degreeLevel };
+            return { cipCodes: PROGRAM_CIP_MAP[ck].cip, label: PROGRAM_CIP_MAP[ck].label, degreeLevel: degreeLevel, searchTerms: cleaned };
           }
         }
       }
@@ -5275,10 +5276,13 @@
         });
 
         // ── KEYWORD RELEVANCE FILTER: Verify program titles relate to search query ──
-        // Prevents false positives from CIP code mismatches in the Scorecard data.
-        // Uses a soft approach: if keyword filter removes ALL results, fall back to quality-only results.
-        if (analysis.cipLabel) {
-          var searchWords = analysis.cipLabel.toLowerCase().split(/\s+/).filter(function(w) { return w.length >= 3; });
+        // Uses the user's actual search terms (not the CIP label) so "communication" doesn't
+        // match "Comparative Media Studies" just because the CIP label includes "Studies".
+        // When searchTerms is available: strict filter (user typed these specific words).
+        // When only cipLabel available: soft fallback (don't eliminate all results).
+        var kwSource = analysis.searchTerms || analysis.cipLabel || '';
+        if (kwSource) {
+          var searchWords = kwSource.toLowerCase().split(/\s+/).filter(function(w) { return w.length >= 3; });
           if (searchWords.length > 0) {
             var kwFiltered = results.filter(function(school) {
               var progs = school['latest.programs.cip_4_digit'] || [];
@@ -5294,8 +5298,12 @@
               });
               return hasRelevantTitle;
             });
-            // Only apply if it doesn't eliminate everything
-            if (kwFiltered.length > 0) results = kwFiltered;
+            // Strict when using user's searchTerms; soft fallback when using cipLabel only
+            if (analysis.searchTerms) {
+              results = kwFiltered; // strict: user explicitly searched these words
+            } else if (kwFiltered.length > 0) {
+              results = kwFiltered; // soft: only apply if it doesn't eliminate everything
+            }
           }
         }
 
